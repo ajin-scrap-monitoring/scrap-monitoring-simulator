@@ -65,7 +65,7 @@ Pillow로 JPEG를 한 번 encoding한다. Camera가 활성화되면 profile의 �
 | `conveyor_length_m` | `2.0` | Pivot 상류의 고정 conveyor 길이 |
 | `conveyor_center_above_wall_m` | `1.25` | 외벽 상단 기준 machine 중심 높이 |
 | `conveyor_body_height_m` | `0.24` | 고정 conveyor 전체 단면 높이 |
-| `duct_height_m` | `0.52` | 회전 chute 단면 높이 |
+| `duct_height_m` | `0.24` | 회전 chute의 열린 U자 단면 전체 높이 |
 | `tip_fraction` | `0.75` | 끝단 하강이 시작되는 길이 비율 |
 | `tip_drop_m` | `0.08` | Chute 끝단 하강 높이 |
 

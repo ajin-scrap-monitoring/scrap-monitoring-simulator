@@ -106,7 +106,7 @@ COPY --from=test /notices/RUST_COPYRIGHT.html \
     /usr/share/doc/scrap-monitoring-simulation-server/RUST_COPYRIGHT.html
 
 ARG BUILD_REVISION=unknown
-ARG BUILD_VERSION=0.2.0
+ARG BUILD_VERSION=0.2.1
 
 LABEL org.opencontainers.image.description="Canonical scene and RPLIDAR S2E simulation server" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \

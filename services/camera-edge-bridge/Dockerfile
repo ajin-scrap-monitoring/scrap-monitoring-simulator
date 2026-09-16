@@ -75,7 +75,7 @@ FROM release AS test
 FROM ${RUNTIME_IMAGE} AS runtime
 
 ARG BUILD_REVISION=unknown
-ARG BUILD_VERSION=0.2.0
+ARG BUILD_VERSION=0.2.1
 
 LABEL org.opencontainers.image.description="Bounded WebSocket to V4L2 bridge for the Scrap synthetic camera" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \

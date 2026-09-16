@@ -508,7 +508,7 @@ def _chute_poly_data(
     tip_start_m = radius * machine.tip_fraction
     stations = [
         (-overlap_m, center_z, socket_width_m),
-        (0.0, center_z, socket_width_m),
+        (0.0, center_z, machine.conveyor_width_m),
         (tip_start_m, center_z, machine.conveyor_width_m),
     ]
     for tip_index in range(1, _CHUTE_TIP_SEGMENTS + 1):
@@ -522,16 +522,25 @@ def _chute_poly_data(
                 + (machine.outlet_width_m - machine.conveyor_width_m) * eased_tip_alpha,
             )
         )
-    half_height = machine.duct_height_m / 2.0
+    half_body_height_m = machine.conveyor_body_height_m / 2.0
+    rail_height_above_deck_m = machine.duct_height_m - half_body_height_m
+    rail_thickness_m = min(
+        machine.conveyor_width_m * 0.06,
+        half_body_height_m,
+    )
     points = np.asarray(
         [
             world_point(longitudinal_m, lateral_m, station_z + vertical_m)
             for longitudinal_m, station_z, width_m in stations
             for lateral_m, vertical_m in (
-                (-width_m / 2.0, -half_height),
-                (width_m / 2.0, -half_height),
-                (width_m / 2.0, half_height),
-                (-width_m / 2.0, half_height),
+                (-width_m / 2.0, -half_body_height_m),
+                (width_m / 2.0, -half_body_height_m),
+                (width_m / 2.0, rail_height_above_deck_m),
+                (width_m / 2.0 - rail_thickness_m, rail_height_above_deck_m),
+                (width_m / 2.0 - rail_thickness_m, 0.0),
+                (-width_m / 2.0 + rail_thickness_m, 0.0),
+                (-width_m / 2.0 + rail_thickness_m, rail_height_above_deck_m),
+                (-width_m / 2.0, rail_height_above_deck_m),
             )
         ],
         dtype=np.float64,
@@ -540,13 +549,13 @@ def _chute_poly_data(
         [
             value
             for ring_index in range(len(stations) - 1)
-            for edge_index in range(4)
+            for edge_index in range(8)
             for value in (
                 4,
-                ring_index * 4 + edge_index,
-                ring_index * 4 + (edge_index + 1) % 4,
-                (ring_index + 1) * 4 + (edge_index + 1) % 4,
-                (ring_index + 1) * 4 + edge_index,
+                ring_index * 8 + edge_index,
+                ring_index * 8 + (edge_index + 1) % 8,
+                (ring_index + 1) * 8 + (edge_index + 1) % 8,
+                (ring_index + 1) * 8 + edge_index,
             )
         ],
         dtype=np.int64,
@@ -583,7 +592,7 @@ def _add_fixed_conveyor(
     material: MaterialConfig,
 ) -> pv.PolyData:
     data = _fixed_conveyor_poly_data(header, machine)
-    _add_machine_mesh(plotter, data, material)
+    _add_machine_mesh(plotter, data, material, show_edges=False)
     return data
 
 

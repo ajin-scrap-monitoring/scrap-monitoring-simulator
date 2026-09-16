@@ -5,13 +5,18 @@ import json
 
 import pytest
 
+from scrap_monitoring_visualizer import browser_probe as browser_probe_module
 from scrap_monitoring_visualizer.browser_probe import (
+    BrowserPageState,
     BrowserProbeResult,
     _cdp_command,
     _metrics,
     _number,
+    _page_state,
+    _prepare_page,
     _section,
     _summarize_samples,
+    _validate_page_state,
     _validate_result,
 )
 
@@ -53,6 +58,210 @@ def test_browser_probe_reads_hidden_metrics_through_cdp() -> None:
         assert "__scrapCameraMetrics" in command["params"]["expression"]
 
     asyncio.run(exercise())
+
+
+def test_browser_probe_activates_target_and_reads_page_state() -> None:
+    async def exercise() -> None:
+        socket = FakeCdpSocket(
+            [
+                json.dumps({"id": 1, "result": {}}),
+                json.dumps({"id": 2, "result": {}}),
+                json.dumps(
+                    {
+                        "id": 3,
+                        "result": {
+                            "result": {
+                                "value": json.dumps(
+                                    {
+                                        "visibilityState": "visible",
+                                        "hidden": False,
+                                        "hasFocus": True,
+                                    }
+                                )
+                            }
+                        },
+                    }
+                ),
+            ]
+        )
+
+        assert await _prepare_page(socket) == 2
+        state = await _page_state(socket, 3)
+        _validate_page_state(state)
+        commands = [json.loads(message) for message in socket.sent]
+        assert [command["method"] for command in commands] == [
+            "Runtime.enable",
+            "Page.bringToFront",
+            "Runtime.evaluate",
+        ]
+        assert "document.visibilityState" in commands[2]["params"]["expression"]
+        assert "document.hidden" in commands[2]["params"]["expression"]
+        assert "document.hasFocus()" in commands[2]["params"]["expression"]
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        BrowserPageState("hidden", True, False),
+        BrowserPageState("visible", False, False),
+        BrowserPageState("visible", True, True),
+    ],
+)
+def test_browser_probe_rejects_inactive_page(state: BrowserPageState) -> None:
+    with pytest.raises(RuntimeError, match="visible and focused"):
+        _validate_page_state(state)
+
+
+class FakeCdpConnection:
+    def __init__(self, websocket: object) -> None:
+        self.websocket = websocket
+
+    async def __aenter__(self) -> object:
+        return self.websocket
+
+    async def __aexit__(self, *args: object) -> None:
+        del args
+
+
+def test_browser_probe_checks_page_state_throughout_measurement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket = object()
+    page_command_ids: list[int] = []
+    metric_command_ids: list[int] = []
+    sleeps: list[float] = []
+    closed_targets: list[str] = []
+    metrics = iter([_sample(float(second)) for second in range(1, 9)])
+
+    async def prepare_page(observed_websocket: object) -> int:
+        assert observed_websocket is websocket
+        return 2
+
+    async def page_state(
+        observed_websocket: object,
+        command_id: int,
+    ) -> BrowserPageState:
+        assert observed_websocket is websocket
+        page_command_ids.append(command_id)
+        return BrowserPageState("visible", False, True)
+
+    async def read_metrics(
+        observed_websocket: object,
+        command_id: int,
+    ) -> dict[str, object]:
+        assert observed_websocket is websocket
+        metric_command_ids.append(command_id)
+        return next(metrics)
+
+    async def sleep(delay_s: float) -> None:
+        sleeps.append(delay_s)
+
+    monkeypatch.setattr(
+        browser_probe_module,
+        "_open_target",
+        lambda cdp_url, page_url: ("target-1", "ws://chrome/target-1"),
+    )
+    monkeypatch.setattr(
+        browser_probe_module,
+        "connect",
+        lambda *args, **kwargs: FakeCdpConnection(websocket),
+    )
+    monkeypatch.setattr(browser_probe_module, "_prepare_page", prepare_page)
+    monkeypatch.setattr(browser_probe_module, "_page_state", page_state)
+    monkeypatch.setattr(browser_probe_module, "_metrics", read_metrics)
+    monkeypatch.setattr(browser_probe_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(
+        browser_probe_module,
+        "_close_target",
+        lambda cdp_url, target_id: closed_targets.append(target_id),
+    )
+
+    result = asyncio.run(
+        browser_probe_module.run_probe(
+            "http://chrome",
+            "http://visualizer",
+            duration_s=6,
+            minimum_fps=27.0,
+            minimum_stable_ratio=1.0,
+        )
+    )
+
+    assert result.presented_fps == 30.0
+    assert page_command_ids == [3, 5, 7, 9, 11, 13, 15, 17]
+    assert metric_command_ids == [4, 6, 8, 10, 12, 14, 16, 18]
+    assert sleeps == [5.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    assert closed_targets == ["target-1"]
+
+
+def test_browser_probe_closes_target_when_page_loses_focus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket = object()
+    states = iter(
+        [
+            BrowserPageState("visible", False, True),
+            BrowserPageState("visible", False, False),
+        ]
+    )
+    closed_targets: list[str] = []
+
+    async def prepare_page(observed_websocket: object) -> int:
+        assert observed_websocket is websocket
+        return 2
+
+    async def page_state(
+        observed_websocket: object,
+        command_id: int,
+    ) -> BrowserPageState:
+        assert observed_websocket is websocket
+        assert command_id in {3, 5}
+        return next(states)
+
+    async def read_metrics(
+        observed_websocket: object,
+        command_id: int,
+    ) -> dict[str, object]:
+        assert observed_websocket is websocket
+        assert command_id == 4
+        return _sample(1.0)
+
+    async def sleep(delay_s: float) -> None:
+        assert delay_s == 5.0
+
+    monkeypatch.setattr(
+        browser_probe_module,
+        "_open_target",
+        lambda cdp_url, page_url: ("target-2", "ws://chrome/target-2"),
+    )
+    monkeypatch.setattr(
+        browser_probe_module,
+        "connect",
+        lambda *args, **kwargs: FakeCdpConnection(websocket),
+    )
+    monkeypatch.setattr(browser_probe_module, "_prepare_page", prepare_page)
+    monkeypatch.setattr(browser_probe_module, "_page_state", page_state)
+    monkeypatch.setattr(browser_probe_module, "_metrics", read_metrics)
+    monkeypatch.setattr(browser_probe_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(
+        browser_probe_module,
+        "_close_target",
+        lambda cdp_url, target_id: closed_targets.append(target_id),
+    )
+
+    with pytest.raises(RuntimeError, match="visible and focused"):
+        asyncio.run(
+            browser_probe_module.run_probe(
+                "http://chrome",
+                "http://visualizer",
+                duration_s=1,
+                minimum_fps=27.0,
+                minimum_stable_ratio=0.9,
+            )
+        )
+
+    assert closed_targets == ["target-2"]
 
 
 def test_browser_probe_validates_metric_shape_and_numbers() -> None:

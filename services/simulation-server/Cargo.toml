@@ -1,6 +1,6 @@
 [package]
 name = "scrap-monitoring-simulation-server"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.96"
 description = "Canonical scene simulator with RPLIDAR S2E-compatible UDP output."

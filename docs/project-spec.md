@@ -37,10 +37,11 @@ Browser는 고정 사선 직교투영 3D 모델과 현장 camera 시점의 live 
 지점은 상단 표식, 적재면까지의 수직선과 교차점 표식으로 나타낸다. 두 영상의 공통 scene
 수치는 영상 아래에 표시한다.
 
-합성 camera scene은 world Y축과 평행한 U자 단면의 고정 conveyor와 두 투입 지점 사이를
-회전하는 chute를 포함한다. Chute는 표시하지 않는 pivot과 겹침 socket을 기준으로 연결하고
-scene 보간 구간에서 부드럽게 회전한다. 끝단 구간만 아래로 꺾인다. 이 machine geometry는
-합성 camera에만 적용하며 1 Hz Browser 3D PNG에는 포함하지 않는다.
+합성 camera scene의 고정 conveyor와 회전 chute는 상부가 열린 U자 단면이다. 고정 conveyor는
+world Y축과 평행하며 chute는 두 투입 지점 사이를 회전한다. Chute는 표시하지 않는 pivot과
+겹침 socket을 기준으로 연결하고 scene 보간 구간에서 부드럽게 회전한다. 끝단 구간만 아래로
+꺾인다. 이 machine geometry는 합성 camera에만 적용하며 1 Hz Browser 3D PNG에는 포함하지
+않는다.
 
 Camera의 외부 출력 계약은 1920 x 1080, 30 Frames Per Second (FPS) Motion JPEG (MJPEG)다.
 CPU renderer는 640 x 360 내부 raster를 만들고 재사용하는 VTK linear scaler로 output 크기까지

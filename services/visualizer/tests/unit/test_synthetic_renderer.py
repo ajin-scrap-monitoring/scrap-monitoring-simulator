@@ -190,28 +190,44 @@ def test_fixed_conveyor_trough_and_chute_follow_derived_inlet_geometry() -> None
     assert conveyor_faces.shape == (18, 5)
     assert np.all(conveyor_faces[:, 0] == 4)
 
-    rings = tuple(chute.points[index : index + 4] for index in range(0, 28, 4))
+    rings = tuple(chute.points[index : index + 8] for index in range(0, 56, 8))
     ring_centers = tuple(np.mean(ring, axis=0) for ring in rings)
+    deck_centers = tuple(np.mean(ring[[4, 5]], axis=0) for ring in rings)
     assert ring_centers[0][:2] == pytest.approx(pivot + (0.0, 0.12))
     assert ring_centers[1][:2] == pytest.approx(pivot)
     assert ring_centers[2][:2] == pytest.approx(
         pivot + machine.tip_fraction * first_vector
     )
     assert ring_centers[-1][:2] == pytest.approx(first_inlet)
-    assert ring_centers[0][2] == pytest.approx(ring_centers[1][2])
-    assert ring_centers[1][2] == pytest.approx(ring_centers[2][2])
-    assert ring_centers[0][2] - ring_centers[-1][2] == pytest.approx(machine.tip_drop_m)
-    tip_heights = np.asarray([center[2] for center in ring_centers[2:]])
+    assert deck_centers[0][2] == pytest.approx(deck_centers[1][2])
+    assert deck_centers[1][2] == pytest.approx(deck_centers[2][2])
+    assert deck_centers[0][2] - deck_centers[-1][2] == pytest.approx(machine.tip_drop_m)
+    tip_heights = np.asarray([center[2] for center in deck_centers[2:]])
     assert np.all(np.diff(tip_heights) <= 0.0)
     assert np.all(np.diff(tip_heights) < 0.0)
     assert np.linalg.norm(rings[0][1] - rings[0][0]) == pytest.approx(1.04)
-    assert np.linalg.norm(rings[1][1] - rings[1][0]) == pytest.approx(1.04)
+    assert np.linalg.norm(rings[1][1] - rings[1][0]) == pytest.approx(1.0)
     assert np.linalg.norm(rings[2][1] - rings[2][0]) == pytest.approx(1.0)
     assert np.linalg.norm(rings[-1][1] - rings[-1][0]) == pytest.approx(0.9)
     assert all(
-        np.linalg.norm(ring[3] - ring[0]) == pytest.approx(machine.duct_height_m)
+        ring[2][2] - ring[1][2] == pytest.approx(machine.duct_height_m)
         for ring in rings
     )
+    assert all(
+        ring[4][2] - ring[0][2] == pytest.approx(machine.conveyor_body_height_m / 2.0)
+        for ring in rings
+    )
+    assert all(
+        np.linalg.norm(ring[3] - ring[2]) == pytest.approx(0.06)
+        and np.linalg.norm(ring[7] - ring[6]) == pytest.approx(0.06)
+        for ring in rings
+    )
+    assert np.linalg.norm(rings[1][5] - rings[1][4]) == pytest.approx(0.88)
+    assert np.linalg.norm(rings[2][5] - rings[2][4]) == pytest.approx(0.88)
+    assert np.linalg.norm(rings[-1][5] - rings[-1][4]) == pytest.approx(0.78)
+    assert rings[1][0][2] == pytest.approx(np.min(base[:, 2]))
+    assert rings[1][4][2] == pytest.approx(np.max(base[:, 2]))
+    assert rings[1][2][2] == pytest.approx(np.max(left_rail[:, 2]))
     socket_axis = ring_centers[1][:2] - ring_centers[0][:2]
     socket_axis /= np.linalg.norm(socket_axis)
     rail_in_socket_m = float(
@@ -222,12 +238,17 @@ def test_fixed_conveyor_trough_and_chute_follow_derived_inlet_geometry() -> None
         0.12
     )
     faces = chute.faces.reshape(-1, 5)
-    assert faces.shape == (24, 5)
+    assert faces.shape == (48, 5)
     assert np.all(faces[:, 0] == 4)
-    assert all(len({int(index) // 4 for index in face[1:]}) == 2 for face in faces)
+    assert all(len({int(index) // 8 for index in face[1:]}) == 2 for face in faces)
+    cross_section_edges = {
+        tuple(sorted((int(face[1]) % 8, int(face[2]) % 8))) for face in faces
+    }
+    assert (3, 6) not in cross_section_edges
+    assert (4, 5) in cross_section_edges
 
     moved = _chute_poly_data(header, second_frame, machine)
-    assert np.mean(moved.points[-4:, :2], axis=0) == pytest.approx(second_inlet)
+    assert np.mean(moved.points[-8:, :2], axis=0) == pytest.approx(second_inlet)
     assert math.degrees(second_pose.polar_angle_rad) == pytest.approx(
         -12.010686806284566
     )
@@ -307,7 +328,7 @@ def test_chute_rotation_eases_continuously_and_preserves_local_shape() -> None:
         axis=2,
     )
     for pose, mesh in zip(poses, meshes, strict=True):
-        rings = mesh.points.reshape(-1, 4, 3)
+        rings = mesh.points.reshape(-1, 8, 3)
         centers = np.mean(rings, axis=1)
         longitudinal = centers[2] - centers[1]
         longitudinal /= np.linalg.norm(longitudinal)

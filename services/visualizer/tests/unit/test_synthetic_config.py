@@ -36,7 +36,7 @@ def test_default_camera_profile_is_packaged_and_valid() -> None:
     assert config.machine.conveyor_length_m == 2.0
     assert config.machine.conveyor_center_above_wall_m == 1.25
     assert config.machine.conveyor_body_height_m == 0.24
-    assert config.machine.duct_height_m == 0.52
+    assert config.machine.duct_height_m == 0.24
     assert config.machine.tip_fraction == 0.75
     assert config.machine.tip_drop_m == 0.08
     assert config.scrap_material.metallic > config.wall_material.metallic
@@ -100,6 +100,23 @@ def test_external_v1_profile_without_raster_dimensions_remains_valid(
     assert config.video.raster_height == config.video.height
 
 
+def test_open_chute_clearance_uses_the_body_below_the_deck(tmp_path: Path) -> None:
+    default = Path(
+        "src/scrap_monitoring_visualizer/synthetic_camera/profiles/default.v1.json"
+    )
+    document = json.loads(default.read_text(encoding="utf-8"))
+    document["machine"].update(
+        conveyor_center_above_wall_m=0.13,
+        duct_height_m=0.5,
+    )
+    override = tmp_path / "camera.json"
+    override.write_text(json.dumps(document), encoding="utf-8")
+
+    config = SyntheticCameraConfig.from_file(str(override))
+
+    assert config.machine.conveyor_center_above_wall_m == 0.13
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -111,7 +128,9 @@ def test_external_v1_profile_without_raster_dimensions_remains_valid(
         lambda profile: profile["camera"].update(view_up=[0, 0, 2]),
         lambda profile: profile["machine"].update(conveyor_width_m=0),
         lambda profile: profile["machine"].update(outlet_width_m=1.1),
-        lambda profile: profile["machine"].update(conveyor_center_above_wall_m=0.2),
+        lambda profile: profile["machine"].update(outlet_width_m=0.1),
+        lambda profile: profile["machine"].update(conveyor_center_above_wall_m=0.1),
+        lambda profile: profile["machine"].update(duct_height_m=0.2),
         lambda profile: profile["machine"].update(tip_fraction=0.74),
         lambda profile: profile["machine"].update(tip_drop_m=0.2),
         lambda profile: profile["materials"]["scrap"].update(metallic=1.1),
