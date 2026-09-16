@@ -1,4 +1,4 @@
-"""Live receiver, renderer and preview process lifetime."""
+"""Live scene receiver and paired Browser presentation lifetime."""
 
 from __future__ import annotations
 
@@ -9,26 +9,19 @@ from typing import Any
 
 import uvicorn
 
-from scrap_monitoring_visualizer.contracts import ContractParser
-from scrap_monitoring_visualizer.limits import (
-    DEFAULT_FRAME_HEIGHT,
-    DEFAULT_FRAME_WIDTH,
-)
-from scrap_monitoring_visualizer.preview import (
-    LatestFrameStore,
-    create_preview_app,
-)
+from scrap_monitoring_visualizer.contracts import ContractParser, SceneDefinition
+from scrap_monitoring_visualizer.preview import create_preview_app
 from scrap_monitoring_visualizer.receiver import SceneReceiver
-from scrap_monitoring_visualizer.rendering import RenderConfig
-from scrap_monitoring_visualizer.rendering.worker import (
-    LatestRenderWorker,
-    RenderRequest,
-)
 from scrap_monitoring_visualizer.state import ExecutionState
 from scrap_monitoring_visualizer.synthetic_camera import (
     SyntheticCameraConfig,
     SyntheticCameraPipeline,
     install_camera_routes,
+)
+from scrap_monitoring_visualizer.synthetic_camera.models import InterpolatedFrame
+from scrap_monitoring_visualizer.visual_stream import (
+    LatestVisualStore,
+    install_visual_routes,
 )
 
 
@@ -38,8 +31,6 @@ class LiveConfig:
     tcp_port: int
     http_host: str
     http_port: int
-    width: int = DEFAULT_FRAME_WIDTH
-    height: int = DEFAULT_FRAME_HEIGHT
     synthetic_camera: SyntheticCameraConfig | None = None
 
     def validate(self) -> None:
@@ -49,11 +40,6 @@ class LiveConfig:
             raise ValueError("listen ports must be between 1 and 65535")
         if self.tcp_host == self.http_host and self.tcp_port == self.http_port:
             raise ValueError("TCP and HTTP endpoints must be different")
-        RenderConfig.from_camera_config(
-            width=self.width,
-            height=self.height,
-            camera_config=self.synthetic_camera,
-        ).validate()
         if self.synthetic_camera is not None:
             self.synthetic_camera.validate()
 
@@ -61,14 +47,10 @@ class LiveConfig:
 class LiveCoordinator:
     def __init__(
         self,
-        frames: LatestFrameStore,
-        worker: LatestRenderWorker,
-        render_config: RenderConfig,
+        visual_store: LatestVisualStore,
         camera: SyntheticCameraPipeline | None = None,
     ) -> None:
-        self._frames = frames
-        self._worker = worker
-        self._render_config = render_config
+        self._visual_store = visual_store
         self._camera = camera
         self._receiver: SceneReceiver | None = None
         self._state = ExecutionState()
@@ -78,28 +60,23 @@ class LiveCoordinator:
     def bind_receiver(self, receiver: SceneReceiver) -> None:
         self._receiver = receiver
 
+    @property
+    def definition(self) -> SceneDefinition | None:
+        return self._state.header
+
     def state_changed(self, state: ExecutionState) -> None:
         self._state = state
         if self._camera is not None:
             self._camera.state_changed(state)
-        frame = state.frame
-        if frame is None:
-            self._worker.invalidate()
-            self._frames.clear()
+        segment = state.segment
+        if segment is None:
+            self._visual_store.clear()
             self._last_received_sequence = None
             self._last_valid_received_at = None
             return
-        if frame.sequence != self._last_received_sequence:
-            self._last_received_sequence = frame.sequence
+        if segment.sequence != self._last_received_sequence:
+            self._last_received_sequence = segment.sequence
             self._last_valid_received_at = datetime.now(UTC).isoformat()
-        assert state.header is not None
-        self._worker.submit(
-            RenderRequest(
-                header=state.header,
-                frame=frame,
-                config=self._render_config,
-            )
-        )
 
     def status(self) -> dict[str, Any]:
         frame = self._state.frame
@@ -125,7 +102,6 @@ class LiveCoordinator:
                 if receiver_snapshot is not None
                 else 0
             ),
-            "render_error": self._worker.last_error,
             "scene": (
                 {
                     "sequence": frame.sequence,
@@ -148,40 +124,28 @@ class LiveCoordinator:
         return status
 
     def poll_renderers(self) -> None:
-        self._worker.poll()
-        if not self._worker.is_alive:
-            raise RuntimeError("browser renderer process exited")
         if self._camera is not None:
             self._camera.poll()
 
 
 async def run_live(config: LiveConfig) -> int:
     config.validate()
-    frames = LatestFrameStore()
-    worker = LatestRenderWorker(frames)
-    worker.start()
+    visual_store = LatestVisualStore()
+
+    def publish_visual(frame: InterpolatedFrame, jpeg: bytes) -> None:
+        visual_store.publish(frame, jpeg)
+
     camera = (
-        SyntheticCameraPipeline(config.synthetic_camera)
+        SyntheticCameraPipeline(
+            config.synthetic_camera,
+            on_published=publish_visual,
+        )
         if config.synthetic_camera is not None
         else None
     )
     if camera is not None:
-        try:
-            camera.start()
-        except Exception:
-            worker.close()
-            raise
-    render_config = RenderConfig.from_camera_config(
-        width=config.width,
-        height=config.height,
-        camera_config=config.synthetic_camera,
-    )
-    coordinator = LiveCoordinator(
-        frames,
-        worker,
-        render_config,
-        camera,
-    )
+        camera.start()
+    coordinator = LiveCoordinator(visual_store, camera)
     receiver = SceneReceiver(ContractParser(), on_state=coordinator.state_changed)
     coordinator.bind_receiver(receiver)
     try:
@@ -191,9 +155,15 @@ async def run_live(config: LiveConfig) -> int:
     except Exception:
         if camera is not None:
             camera.close()
-        worker.close()
         raise
-    app = create_preview_app(frames, coordinator.status)
+    app = create_preview_app(coordinator.status)
+    if config.synthetic_camera is not None:
+        install_visual_routes(
+            app,
+            visual_store,
+            lambda: coordinator.definition,
+            config.synthetic_camera,
+        )
     if camera is not None:
         install_camera_routes(
             app,
@@ -210,13 +180,12 @@ async def run_live(config: LiveConfig) -> int:
             log_level="info",
             timeout_keep_alive=5,
             ws_max_queue=1,
-            ws_max_size=4_096,
+            ws_max_size=4_194_304,
             ws_per_message_deflate=False,
             ws_ping_interval=0.5,
             ws_ping_timeout=2.0,
         )
     )
-
     poll_error: Exception | None = None
 
     async def poll_renderer() -> None:
@@ -240,14 +209,8 @@ async def run_live(config: LiveConfig) -> int:
         try:
             await poll_task
         finally:
-            try:
-                try:
-                    worker.poll()
-                finally:
-                    worker.close()
-            finally:
-                if camera is not None:
-                    camera.close()
+            if camera is not None:
+                camera.close()
     if poll_error is not None:
         raise RuntimeError("render polling failed") from poll_error
     return 0

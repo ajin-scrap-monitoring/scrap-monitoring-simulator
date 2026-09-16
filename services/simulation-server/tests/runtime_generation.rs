@@ -32,6 +32,8 @@ fn two_workers_share_one_time_ordered_model_and_generate_both_sensors() {
         ["lidar_1", "lidar_2"]
     );
     assert!(first.scans.iter().all(|scan| scan.scan_id() == 1));
+    assert_eq!(first.canonical_keyframes.len(), 1);
+    assert_eq!(first.canonical_keyframes[0].state.elapsed_s, 0.1);
     assert_eq!(runtime.stats().completed_batches, 1);
     assert_eq!(runtime.stats().generated_scans, 2);
 
@@ -97,9 +99,17 @@ fn generation_batches_expose_every_phase_and_cycle_transition_without_a_surface(
     inputs.simulator.measurement.distortions.dropout.enabled = false;
     let mut runtime = GenerationRuntime::from_inputs(&inputs).unwrap();
     let mut transitions = Vec::new();
+    let mut keyframe_elapsed = Vec::new();
 
     for _ in 0..50 {
-        transitions.extend(runtime.next_completed_scans().unwrap().scenario_transitions);
+        let batch = runtime.next_completed_scans().unwrap();
+        transitions.extend(batch.scenario_transitions);
+        keyframe_elapsed.extend(
+            batch
+                .canonical_keyframes
+                .into_iter()
+                .map(|keyframe| keyframe.state.elapsed_s),
+        );
         if transitions.last().is_some_and(|transition| {
             transition.phase == ScenarioPhase::Filling && transition.cycle_index == 1
         }) {
@@ -113,4 +123,35 @@ fn generation_batches_expose_every_phase_and_cycle_transition_without_a_surface(
     assert_eq!(transitions[1].phase, ScenarioPhase::Filling);
     assert_eq!(transitions[1].cycle_index, 1);
     assert!(transitions[0].elapsed_s < transitions[1].elapsed_s);
+    for transition in transitions {
+        assert!(
+            keyframe_elapsed
+                .iter()
+                .any(|elapsed_s| elapsed_s.to_bits() == transition.elapsed_s.to_bits())
+        );
+    }
+}
+
+#[test]
+fn generation_batches_publish_strictly_ordered_canonical_events() {
+    let mut runtime = GenerationRuntime::from_inputs(&inputs()).unwrap();
+    let mut elapsed = Vec::new();
+    for _ in 0..20 {
+        elapsed.extend(
+            runtime
+                .next_completed_scans()
+                .unwrap()
+                .canonical_keyframes
+                .into_iter()
+                .map(|keyframe| keyframe.state.elapsed_s),
+        );
+    }
+
+    assert_eq!(elapsed.first().copied(), Some(0.1));
+    assert!(elapsed.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(
+        elapsed
+            .iter()
+            .all(|value| ((value * 10.0).round() - value * 10.0).abs() < 1e-10)
+    );
 }

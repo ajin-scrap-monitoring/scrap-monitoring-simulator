@@ -4,8 +4,8 @@ from .machine import (
     ExecutionState,
     StateError,
     StateTransition,
-    accept_frame,
     accept_header,
+    accept_segment,
     disconnect,
 )
 
@@ -14,6 +14,6 @@ __all__ = [
     "StateError",
     "StateTransition",
     "accept_header",
-    "accept_frame",
+    "accept_segment",
     "disconnect",
 ]

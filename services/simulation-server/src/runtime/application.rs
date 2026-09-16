@@ -39,7 +39,6 @@ pub struct RuntimeSettings {
     pub lidar_2_bind: SocketAddr,
     pub scene_host: String,
     pub scene_port: u16,
-    pub scene_interval_s: f64,
     pub mean_fill_duration_s: Option<f64>,
 }
 
@@ -58,11 +57,6 @@ impl RuntimeSettings {
         if self.scene_port == 0 {
             return Err(ApplicationError::Invalid(
                 "scene stream port must be from 1 through 65535",
-            ));
-        }
-        if !self.scene_interval_s.is_finite() || self.scene_interval_s <= 0.0 {
-            return Err(ApplicationError::Invalid(
-                "scene interval must be finite and positive",
             ));
         }
         if self
@@ -152,29 +146,21 @@ pub async fn run(settings: RuntimeSettings) -> Result<ApplicationSummary, Applic
     ];
     let s2e = S2eRuntime::bind(endpoint_configs).await?;
 
-    let scene_config = ScenePublisherConfig::new(
-        settings.scene_host,
-        settings.scene_port,
-        settings.scene_interval_s,
-        3.0,
-        2.0,
-        0.5,
-        5.0,
-    )?;
+    let initial_keyframe = generation.model_snapshot()?;
+    let scene_config =
+        ScenePublisherConfig::new(settings.scene_host, settings.scene_port, 3.0, 2.0, 0.5, 5.0)?;
     let scene_header = SceneStreamHeader::new(
         inputs.environment.environment_id.clone(),
         run_id.clone(),
         fingerprint,
         inputs.simulator.seed,
-        StaticScene::from_inputs(&inputs)?,
+        StaticScene::from_inputs(&inputs, &initial_keyframe.surface)?,
     )?;
-    let mut scene = TcpScenePublisher::new(scene_config, scene_header)?;
+    let mut scene = TcpScenePublisher::new(scene_config, scene_header, initial_keyframe)?;
     scene.start()?;
-    scene.publish(generation.model_snapshot()?)?;
     let scene_endpoint = scene.endpoint();
 
-    let mut coordinator =
-        GenerationCoordinator::start(generation, Instant::now(), settings.scene_interval_s)?;
+    let mut coordinator = GenerationCoordinator::start(generation, Instant::now())?;
     let mut generated_scans = 0_u64;
     let execution = loop {
         tokio::select! {
@@ -199,9 +185,14 @@ pub async fn run(settings: RuntimeSettings) -> Result<ApplicationSummary, Applic
                 if let Some(error) = scan_error {
                     break Err(error);
                 }
-                if let Some(snapshot) = output.scene_snapshot
-                    && let Err(error) = scene.publish(snapshot)
-                {
+                let mut scene_error = None;
+                for keyframe in output.batch.canonical_keyframes {
+                    if let Err(error) = scene.publish(keyframe) {
+                        scene_error = Some(error);
+                        break;
+                    }
+                }
+                if let Some(error) = scene_error {
                     break Err(ApplicationError::from(error));
                 }
             }
@@ -228,7 +219,6 @@ pub async fn run(settings: RuntimeSettings) -> Result<ApplicationSummary, Applic
 
 struct GeneratedOutput {
     batch: GenerationBatch,
-    scene_snapshot: Option<crate::scenario::ScenarioModelSnapshot>,
 }
 
 struct GenerationCoordinator {
@@ -238,24 +228,14 @@ struct GenerationCoordinator {
 }
 
 impl GenerationCoordinator {
-    fn start(
-        mut runtime: GenerationRuntime,
-        epoch: Instant,
-        scene_interval_s: f64,
-    ) -> Result<Self, ApplicationError> {
+    fn start(mut runtime: GenerationRuntime, epoch: Instant) -> Result<Self, ApplicationError> {
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let (sender, receiver) = mpsc::channel(GENERATION_OUTPUT_CAPACITY);
         let worker = thread::Builder::new()
             .name("simulation-coordinator".into())
             .spawn(move || {
-                let result = run_generation_worker(
-                    &mut runtime,
-                    epoch,
-                    scene_interval_s,
-                    &worker_stop,
-                    &sender,
-                );
+                let result = run_generation_worker(&mut runtime, epoch, &worker_stop, &sender);
                 let shutdown = runtime.shutdown().map_err(|error| error.to_string());
                 result.and(shutdown)
             })
@@ -301,25 +281,13 @@ impl Drop for GenerationCoordinator {
 fn run_generation_worker(
     runtime: &mut GenerationRuntime,
     epoch: Instant,
-    scene_interval_s: f64,
     stop: &AtomicBool,
     sender: &mpsc::Sender<GeneratedOutput>,
 ) -> std::result::Result<(), String> {
-    let mut next_scene_s = scene_interval_s;
     while !stop.load(Ordering::Acquire) {
         let batch = runtime
             .next_completed_scans()
             .map_err(|error| error.to_string())?;
-        let scene_due = batch.completed_at_s + 1e-12 >= next_scene_s;
-        let scene_snapshot = scene_due
-            .then(|| runtime.model_snapshot())
-            .transpose()
-            .map_err(|error| error.to_string())?;
-        if scene_due {
-            next_scene_s = (batch.completed_at_s / scene_interval_s + 1e-12).floor()
-                * scene_interval_s
-                + scene_interval_s;
-        }
         let deadline = epoch
             .checked_add(Duration::from_secs_f64(batch.completed_at_s))
             .ok_or_else(|| "simulation deadline exceeds monotonic clock range".to_owned())?;
@@ -333,13 +301,7 @@ fn run_generation_worker(
         if stop.load(Ordering::Acquire) {
             break;
         }
-        if sender
-            .blocking_send(GeneratedOutput {
-                batch,
-                scene_snapshot,
-            })
-            .is_err()
-        {
+        if sender.blocking_send(GeneratedOutput { batch }).is_err() {
             break;
         }
     }
@@ -417,7 +379,6 @@ mod tests {
             lidar_2_bind: "127.0.0.1:8089".parse().unwrap(),
             scene_host: "127.0.0.1".into(),
             scene_port: 17_000,
-            scene_interval_s: 1.0,
             mean_fill_duration_s: None,
         };
         assert!(matches!(
@@ -434,7 +395,6 @@ mod tests {
             lidar_2_bind: "127.0.0.1:8090".parse().unwrap(),
             scene_host: "127.0.0.1".into(),
             scene_port: 17_000,
-            scene_interval_s: 1.0,
             mean_fill_duration_s: Some(0.0),
         };
         assert!(matches!(

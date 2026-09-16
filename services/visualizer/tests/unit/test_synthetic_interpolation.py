@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from scrap_monitoring_visualizer.contracts import ContractParser, SceneFrame
+from scrap_monitoring_visualizer.contracts import (
+    ContractParser,
+    SceneDefinition,
+    SceneFrame,
+    SceneSegment,
+    materialize_keyframe,
+)
 from scrap_monitoring_visualizer.synthetic_camera.interpolation import (
     InterpolationError,
     interpolate_frames,
@@ -17,20 +23,28 @@ from scrap_monitoring_visualizer.synthetic_camera.scheduler import (
     schedule_segment,
 )
 
-CONTRACT_ROOT = Path("../contracts/scene/v1")
+CONTRACT_ROOT = Path("../contracts/scene/v2")
 
 
 @pytest.fixture(scope="module")
 def frame() -> SceneFrame:
     parser = ContractParser(CONTRACT_ROOT)
-    line = (
-        (CONTRACT_ROOT / "fixtures/scene.v1.jsonl")
+    lines = (
+        (CONTRACT_ROOT / "fixtures/scene.v2.jsonl")
         .read_bytes()
-        .splitlines(keepends=True)[1]
+        .splitlines(keepends=True)
     )
-    parsed = parser.parse_line(line).value
-    assert isinstance(parsed, SceneFrame)
-    return parsed
+    header = parser.parse_line(lines[0]).value
+    segment = parser.parse_line(lines[1]).value
+    assert isinstance(header, SceneDefinition)
+    assert isinstance(segment, SceneSegment)
+    frame = materialize_keyframe(
+        header, segment.right, segment.right_sequence, segment.run_id
+    )
+    return replace(
+        frame,
+        scenario=replace(frame.scenario, elapsed_s=1.0, surface_updated_at_s=1.0),
+    )
 
 
 def _right(frame: SceneFrame) -> SceneFrame:

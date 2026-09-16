@@ -13,7 +13,8 @@ from PIL import Image
 from scrap_monitoring_visualizer.contracts import (
     ContractParser,
     SceneDefinition,
-    SceneFrame,
+    SceneSegment,
+    materialize_keyframe,
 )
 
 from .models import SyntheticCameraConfig
@@ -39,15 +40,18 @@ def run_probe(
     parser = ContractParser(contract_root)
     records = tuple(
         parser.parse_line(line).value
-        for line in (contract_root / "fixtures/scene.v1.jsonl")
+        for line in (contract_root / "fixtures/scene.v2.jsonl")
         .read_bytes()
         .splitlines(keepends=True)
     )
-    definition, scene_frame = records
+    definition, segment = records
     if not isinstance(definition, SceneDefinition) or not isinstance(
-        scene_frame, SceneFrame
+        segment, SceneSegment
     ):
-        raise RuntimeError("contract fixture does not contain a header and frame")
+        raise RuntimeError("contract fixture does not contain a header and segment")
+    scene_frame = materialize_keyframe(
+        definition, segment.right, segment.right_sequence, segment.run_id
+    )
     config = SyntheticCameraConfig.from_file()
     config = replace(
         config,
@@ -90,7 +94,7 @@ def main() -> None:
     parser.add_argument(
         "--contracts",
         type=Path,
-        default=Path("/workspace/contracts/scene/v1"),
+        default=Path("/workspace/contracts/scene/v2"),
     )
     args = parser.parse_args()
     print(json.dumps(asdict(run_probe(args.output, args.contracts)), sort_keys=True))

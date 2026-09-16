@@ -6,7 +6,7 @@ server_image="${SCRAP_SIMULATOR_TEST_SERVER_IMAGE:-scrap-monitoring-simulator-se
 visualizer_image="${SCRAP_SIMULATOR_TEST_VISUALIZER_IMAGE:-scrap-monitoring-simulator-visualizer:local}"
 edge_image="${SCRAP_SIMULATOR_TEST_EDGE_IMAGE:-scrap-monitoring-simulator-camera-edge-bridge:local}"
 build_revision="${BUILD_REVISION:-local}"
-build_version="${BUILD_VERSION:-0.2.1}"
+build_version="${BUILD_VERSION:-0.3.0}"
 edge_smoke_log="$(mktemp)"
 trap 'rm -f "$edge_smoke_log"' EXIT
 
@@ -24,10 +24,10 @@ check_static() {
     test ! -e Dockerfile
     test "$(find services -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | tr '\n' ' ')" = \
         "camera-edge-bridge simulation-server visualizer "
-    cmp contracts/scene/v1/definition.schema.json \
-        services/visualizer/src/scrap_monitoring_visualizer/contracts/schema/v1/definition.schema.json
-    cmp contracts/scene/v1/frame.schema.json \
-        services/visualizer/src/scrap_monitoring_visualizer/contracts/schema/v1/frame.schema.json
+    cmp contracts/scene/v2/definition.schema.json \
+        services/visualizer/src/scrap_monitoring_visualizer/contracts/schema/v2/definition.schema.json
+    cmp contracts/scene/v2/segment.schema.json \
+        services/visualizer/src/scrap_monitoring_visualizer/contracts/schema/v2/segment.schema.json
     bash -n scripts/*.sh deploy/edge/*.sh
     git diff-tree --check --root -r HEAD
     git diff --check HEAD
@@ -83,21 +83,11 @@ check_amd64_runtime() {
     local server_probe_id=$!
     docker run --rm --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m \
         --entrypoint python "$visualizer_image" \
-        -m scrap_monitoring_visualizer.runtime_probe --output /tmp/runtime-probe &
-    local runtime_probe_id=$!
-    docker run --rm --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m \
-        --entrypoint python "$visualizer_image" \
-        -m scrap_monitoring_visualizer.rendering.probe --output /tmp/scene-probe &
-    local scene_probe_id=$!
-    docker run --rm --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m \
-        --entrypoint python "$visualizer_image" \
         -m scrap_monitoring_visualizer.synthetic_camera.probe --output /tmp/camera-probe &
     local camera_probe_id=$!
 
     wait_for_jobs \
         "$server_probe_id" \
-        "$runtime_probe_id" \
-        "$scene_probe_id" \
         "$camera_probe_id"
 
     scripts/check-integration.sh

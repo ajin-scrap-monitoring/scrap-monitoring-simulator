@@ -1,4 +1,4 @@
-"""Immutable canonical scene version 1 records."""
+"""Immutable canonical scene version 2 records."""
 
 from dataclasses import dataclass
 from typing import Literal
@@ -16,6 +16,13 @@ class Sensor:
 
 
 @dataclass(frozen=True, slots=True)
+class SurfaceGrid:
+    cell_size_m: float
+    x_coordinates_m: tuple[float, ...]
+    y_coordinates_m: tuple[float, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Scene:
     coordinate_system: Literal["right-handed-z-up"]
     length_unit: Literal["m"]
@@ -25,11 +32,12 @@ class Scene:
     top_z_m: float
     inlet_positions_xy_m: tuple[Coordinate2, ...]
     sensors: tuple[Sensor, ...]
+    surface: SurfaceGrid
 
 
 @dataclass(frozen=True, slots=True)
 class SceneDefinition:
-    scene_version: Literal[1]
+    scene_version: Literal[2]
     type: Literal["scene_definition"]
     environment_id: str
     run_id: str
@@ -55,6 +63,12 @@ class Scenario:
 
 
 @dataclass(frozen=True, slots=True)
+class SceneKeyframe:
+    scenario: Scenario
+    heights_m: tuple[tuple[float, ...], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Surface:
     cell_size_m: float
     x_coordinates_m: tuple[float, ...]
@@ -64,15 +78,51 @@ class Surface:
 
 @dataclass(frozen=True, slots=True)
 class SceneFrame:
-    scene_version: Literal[1]
-    type: Literal["scene_frame"]
+    """A static-grid keyframe materialized for existing geometry consumers."""
+
+    scene_version: Literal[2]
+    type: Literal["scene_keyframe"]
     sequence: int
     run_id: str
     scenario: Scenario
     surface: Surface
 
 
+def materialize_keyframe(
+    definition: SceneDefinition,
+    keyframe: SceneKeyframe,
+    sequence: int,
+    run_id: str,
+) -> SceneFrame:
+    grid = definition.scene.surface
+    return SceneFrame(
+        scene_version=2,
+        type="scene_keyframe",
+        sequence=sequence,
+        run_id=run_id,
+        scenario=keyframe.scenario,
+        surface=Surface(
+            cell_size_m=grid.cell_size_m,
+            x_coordinates_m=grid.x_coordinates_m,
+            y_coordinates_m=grid.y_coordinates_m,
+            heights_m=keyframe.heights_m,
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SceneSegment:
+    scene_version: Literal[2]
+    type: Literal["scene_segment"]
+    sequence: int
+    left_sequence: int
+    right_sequence: int
+    run_id: str
+    left: SceneKeyframe
+    right: SceneKeyframe
+
+
 @dataclass(frozen=True, slots=True)
 class ParsedRecord:
     raw_line: bytes
-    value: SceneDefinition | SceneFrame
+    value: SceneDefinition | SceneSegment

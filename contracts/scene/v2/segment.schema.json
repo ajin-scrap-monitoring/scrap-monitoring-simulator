@@ -1,0 +1,155 @@
+{
+  "$defs": {
+    "keyframe": {
+      "additionalProperties": false,
+      "properties": {
+        "heights_m": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "type": "array"
+          },
+          "minItems": 2,
+          "type": "array"
+        },
+        "scenario": {
+          "$ref": "#/$defs/scenario"
+        }
+      },
+      "required": [
+        "scenario",
+        "heights_m"
+      ],
+      "type": "object"
+    },
+    "scenario": {
+      "additionalProperties": false,
+      "properties": {
+        "current_inlet_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cycle_index": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "elapsed_s": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "phase": {
+          "enum": [
+            "filling",
+            "collecting"
+          ]
+        },
+        "phase_duration_s": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "phase_ends_at_s": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "phase_started_at_s": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "rate_factor": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "surface_fill_ratio": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "surface_updated_at_s": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "surface_volume_m3": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "target_fill_ratio": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "elapsed_s",
+        "surface_updated_at_s",
+        "cycle_index",
+        "phase",
+        "phase_started_at_s",
+        "phase_ends_at_s",
+        "phase_duration_s",
+        "rate_factor",
+        "target_fill_ratio",
+        "surface_fill_ratio",
+        "surface_volume_m3",
+        "current_inlet_index"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/ajin-scrap-monitoring/scrap-monitoring-simulator/contracts/scene/v2/segment.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "left": {
+      "$ref": "#/$defs/keyframe"
+    },
+    "left_sequence": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "right": {
+      "$ref": "#/$defs/keyframe"
+    },
+    "right_sequence": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "run_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "scene_version": {
+      "const": 2
+    },
+    "sequence": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "type": {
+      "const": "scene_segment"
+    }
+  },
+  "required": [
+    "scene_version",
+    "type",
+    "sequence",
+    "left_sequence",
+    "right_sequence",
+    "run_id",
+    "left",
+    "right"
+  ],
+  "title": "Canonical scene segment v2",
+  "type": "object"
+}

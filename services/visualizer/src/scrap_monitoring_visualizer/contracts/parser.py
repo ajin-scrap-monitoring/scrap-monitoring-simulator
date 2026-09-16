@@ -1,4 +1,4 @@
-"""Strict parser for canonical scene version 1 JSON Lines records."""
+"""Strict parser for canonical scene version 2 JSON Lines records."""
 
 from __future__ import annotations
 
@@ -11,19 +11,17 @@ from typing import Any, Never, cast
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
-from scrap_monitoring_visualizer.limits import (
-    MAX_BOUNDARY_VERTICES,
-    MAX_GRID_POINTS,
-)
+from scrap_monitoring_visualizer.limits import MAX_BOUNDARY_VERTICES, MAX_GRID_POINTS
 
 from .models import (
     ParsedRecord,
     Scenario,
     Scene,
     SceneDefinition,
-    SceneFrame,
+    SceneKeyframe,
+    SceneSegment,
     Sensor,
-    Surface,
+    SurfaceGrid,
 )
 
 MAX_RECORD_BYTES = 1_048_576
@@ -134,9 +132,10 @@ def _validate_polygon(boundary: tuple[tuple[float, float], ...]) -> None:
     edges = tuple(zip(boundary, boundary[1:] + boundary[:1], strict=True))
     for left_index, (a, b) in enumerate(edges):
         for right_index, (c, d) in enumerate(edges):
-            if right_index <= left_index:
-                continue
-            if right_index in {left_index + 1, (left_index - 1) % len(edges)}:
+            if right_index <= left_index or right_index in {
+                left_index + 1,
+                (left_index - 1) % len(edges),
+            }:
                 continue
             if _segments_intersect(a, b, c, d):
                 raise ContractError("boundary", "boundary must not self-intersect")
@@ -158,12 +157,6 @@ def _point_in_polygon(
     return inside
 
 
-def _validate_vector(vector: tuple[float, float, float], path: str) -> None:
-    length = math.sqrt(sum(component * component for component in vector))
-    if not math.isclose(length, 1.0, rel_tol=0.0, abs_tol=_VECTOR_TOLERANCE):
-        raise ContractError("sensor", f"{path} must be a unit vector")
-
-
 def _strictly_increasing(values: Iterable[float]) -> bool:
     sequence = tuple(values)
     return all(
@@ -178,16 +171,16 @@ class ContractParser:
         root = contract_root or self._default_contract_root()
         self._validators = {
             "scene_definition": self._load_validator(root / "definition.schema.json"),
-            "scene_frame": self._load_validator(root / "frame.schema.json"),
+            "scene_segment": self._load_validator(root / "segment.schema.json"),
         }
 
     @staticmethod
     def _default_contract_root() -> Path:
-        candidate = Path(__file__).with_name("schema") / "v1"
-        if (candidate / "definition.schema.json").is_file():
+        candidate = Path(__file__).with_name("schema") / "v2"
+        if candidate.is_dir():
             return candidate
         raise ContractError(
-            "schema_source", "canonical scene version 1 schemas not found"
+            "schema_source", "canonical scene version 2 schemas not found"
         )
 
     @staticmethod
@@ -209,9 +202,8 @@ class ContractParser:
         if len(raw_line) > MAX_RECORD_BYTES:
             raise ContractError("line_limit", "record byte limit exceeded")
         try:
-            text = raw_line[:-1].decode("utf-8")
             value = json.loads(
-                text,
+                raw_line[:-1].decode("utf-8"),
                 object_pairs_hook=_unique_object,
                 parse_constant=_reject_constant,
             )
@@ -231,12 +223,11 @@ class ContractParser:
         )
         if errors:
             raise _schema_error(errors[0])
+        model: SceneDefinition | SceneSegment
         if record_type == "scene_definition":
-            model: SceneDefinition | SceneFrame = self._definition(
-                cast(dict[str, Any], value)
-            )
+            model = self._definition(cast(dict[str, Any], value))
         else:
-            model = self._frame(cast(dict[str, Any], value))
+            model = self._segment(cast(dict[str, Any], value))
         return ParsedRecord(raw_line=raw_line, value=model)
 
     def _definition(self, value: dict[str, Any]) -> SceneDefinition:
@@ -246,8 +237,10 @@ class ContractParser:
             for item in cast(list[Any], scene_value["boundary_xy_m"])
         )
         _validate_polygon(boundary)
-        floor_z_m = float(scene_value["floor_z_m"])
-        top_z_m = float(scene_value["top_z_m"])
+        floor_z_m, top_z_m = (
+            float(scene_value["floor_z_m"]),
+            float(scene_value["top_z_m"]),
+        )
         if floor_z_m >= top_z_m:
             raise ContractError("scene_height", "floor_z_m must be below top_z_m")
         inlets = tuple(
@@ -262,47 +255,79 @@ class ContractParser:
         )
         if len({sensor.sensor_id for sensor in sensors}) != len(sensors):
             raise ContractError("sensor", "sensor_id values must be unique")
-        scene = Scene(
-            coordinate_system="right-handed-z-up",
-            length_unit="m",
-            angle_unit="deg",
-            boundary_xy_m=boundary,
-            floor_z_m=floor_z_m,
-            top_z_m=top_z_m,
-            inlet_positions_xy_m=inlets,
-            sensors=sensors,
+        surface_value = cast(dict[str, Any], scene_value["surface"])
+        grid = SurfaceGrid(
+            cell_size_m=float(surface_value["cell_size_m"]),
+            x_coordinates_m=tuple(
+                float(item)
+                for item in cast(list[Any], surface_value["x_coordinates_m"])
+            ),
+            y_coordinates_m=tuple(
+                float(item)
+                for item in cast(list[Any], surface_value["y_coordinates_m"])
+            ),
         )
+        if not _strictly_increasing(grid.x_coordinates_m) or not _strictly_increasing(
+            grid.y_coordinates_m
+        ):
+            raise ContractError(
+                "surface_coordinates", "surface coordinates must increase"
+            )
+        if len(grid.x_coordinates_m) * len(grid.y_coordinates_m) > MAX_GRID_POINTS:
+            raise ContractError("grid_limit", "surface grid point limit exceeded")
         return SceneDefinition(
-            scene_version=1,
-            type="scene_definition",
-            environment_id=cast(str, value["environment_id"]),
-            run_id=cast(str, value["run_id"]),
-            input_fingerprint_sha256=cast(str, value["input_fingerprint_sha256"]),
-            seed=cast(int, value["seed"]),
-            scene=scene,
+            2,
+            "scene_definition",
+            cast(str, value["environment_id"]),
+            cast(str, value["run_id"]),
+            cast(str, value["input_fingerprint_sha256"]),
+            cast(int, value["seed"]),
+            Scene(
+                "right-handed-z-up",
+                "m",
+                "deg",
+                boundary,
+                floor_z_m,
+                top_z_m,
+                inlets,
+                sensors,
+                grid,
+            ),
         )
 
     @staticmethod
     def _sensor(value: dict[str, Any], index: int) -> Sensor:
         sensor = Sensor(
-            sensor_id=cast(str, value["sensor_id"]),
-            p0_m=_coordinate3(cast(list[Any], value["p0_m"])),
-            u0=_coordinate3(cast(list[Any], value["u0"])),
-            u90=_coordinate3(cast(list[Any], value["u90"])),
+            cast(str, value["sensor_id"]),
+            _coordinate3(cast(list[Any], value["p0_m"])),
+            _coordinate3(cast(list[Any], value["u0"])),
+            _coordinate3(cast(list[Any], value["u90"])),
         )
-        _validate_vector(sensor.u0, f"sensors[{index}].u0")
-        _validate_vector(sensor.u90, f"sensors[{index}].u90")
-        dot = sum(
-            left * right for left, right in zip(sensor.u0, sensor.u90, strict=True)
-        )
-        if not math.isclose(dot, 0.0, rel_tol=0.0, abs_tol=_VECTOR_TOLERANCE):
+        for label, vector in (("u0", sensor.u0), ("u90", sensor.u90)):
+            if not math.isclose(
+                math.sqrt(sum(component * component for component in vector)),
+                1.0,
+                rel_tol=0.0,
+                abs_tol=_VECTOR_TOLERANCE,
+            ):
+                raise ContractError(
+                    "sensor", f"sensors[{index}].{label} must be a unit vector"
+                )
+        if not math.isclose(
+            sum(
+                left * right for left, right in zip(sensor.u0, sensor.u90, strict=True)
+            ),
+            0.0,
+            rel_tol=0.0,
+            abs_tol=_VECTOR_TOLERANCE,
+        ):
             raise ContractError(
                 "sensor", f"sensors[{index}] vectors must be orthogonal"
             )
         return sensor
 
     @staticmethod
-    def _frame(value: dict[str, Any]) -> SceneFrame:
+    def _keyframe(value: dict[str, Any]) -> SceneKeyframe:
         scenario_value = cast(dict[str, Any], value["scenario"])
         scenario = Scenario(
             elapsed_s=float(scenario_value["elapsed_s"]),
@@ -322,8 +347,8 @@ class ContractParser:
             raise ContractError(
                 "scenario_time", "surface update cannot be in the future"
             )
-        if not (
-            scenario.phase_started_at_s
+        if (
+            not scenario.phase_started_at_s
             <= scenario.elapsed_s
             <= scenario.phase_ends_at_s
         ):
@@ -335,40 +360,37 @@ class ContractParser:
             abs_tol=1e-9,
         ):
             raise ContractError("scenario_time", "phase duration is inconsistent")
-        surface_value = cast(dict[str, Any], value["surface"])
-        x_coordinates = tuple(
-            float(item) for item in cast(list[Any], surface_value["x_coordinates_m"])
+        return SceneKeyframe(
+            scenario,
+            tuple(
+                tuple(float(item) for item in cast(list[Any], row))
+                for row in cast(list[Any], value["heights_m"])
+            ),
         )
-        y_coordinates = tuple(
-            float(item) for item in cast(list[Any], surface_value["y_coordinates_m"])
+
+    def _segment(self, value: dict[str, Any]) -> SceneSegment:
+        left = self._keyframe(cast(dict[str, Any], value["left"]))
+        right = self._keyframe(cast(dict[str, Any], value["right"]))
+        sequence = cast(int, value["sequence"])
+        left_sequence, right_sequence = (
+            cast(int, value["left_sequence"]),
+            cast(int, value["right_sequence"]),
         )
-        heights = tuple(
-            tuple(float(item) for item in cast(list[Any], row))
-            for row in cast(list[Any], surface_value["heights_m"])
-        )
-        if not _strictly_increasing(x_coordinates) or not _strictly_increasing(
-            y_coordinates
-        ):
+        if sequence != right_sequence or left_sequence + 1 != right_sequence:
             raise ContractError(
-                "surface_coordinates", "surface coordinates must increase"
+                "segment_sequence", "segment sequence identifiers must be adjacent"
             )
-        if len(heights) != len(y_coordinates) or any(
-            len(row) != len(x_coordinates) for row in heights
-        ):
-            raise ContractError("surface_shape", "heights shape must be y by x")
-        if len(x_coordinates) * len(y_coordinates) > MAX_GRID_POINTS:
-            raise ContractError("grid_limit", "surface grid point limit exceeded")
-        surface = Surface(
-            cell_size_m=float(surface_value["cell_size_m"]),
-            x_coordinates_m=x_coordinates,
-            y_coordinates_m=y_coordinates,
-            heights_m=heights,
-        )
-        return SceneFrame(
-            scene_version=1,
-            type="scene_frame",
-            sequence=cast(int, value["sequence"]),
-            run_id=cast(str, value["run_id"]),
-            scenario=scenario,
-            surface=surface,
+        if left.scenario.elapsed_s >= right.scenario.elapsed_s:
+            raise ContractError(
+                "segment_time", "segment keyframes must be strictly ordered"
+            )
+        return SceneSegment(
+            2,
+            "scene_segment",
+            sequence,
+            left_sequence,
+            right_sequence,
+            cast(str, value["run_id"]),
+            left,
+            right,
         )

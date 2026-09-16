@@ -43,7 +43,6 @@ docker run --detach \
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
     --env SCRAP_SIMULATOR_SCENE_HOST=visualizer \
     --env SCRAP_SIMULATOR_SCENE_PORT=17000 \
-    --env SCRAP_SIMULATOR_SCENE_INTERVAL_S=1.0 \
     "$server_image" run >/dev/null
 
 if ! docker exec "$visualizer_container" \

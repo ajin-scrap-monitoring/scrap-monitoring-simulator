@@ -9,24 +9,28 @@ from PIL import Image
 from scrap_monitoring_visualizer.contracts import (
     ContractParser,
     SceneDefinition,
-    SceneFrame,
+    SceneSegment,
+    materialize_keyframe,
 )
 from scrap_monitoring_visualizer.synthetic_camera import SyntheticCameraConfig
 from scrap_monitoring_visualizer.synthetic_camera.renderer import VtkPbrRenderer
 
-CONTRACT_ROOT = Path("../contracts/scene/v1")
+CONTRACT_ROOT = Path("../contracts/scene/v2")
 
 
 def test_vtk_backend_renders_perspective_mjpeg_source_frame() -> None:
     parser = ContractParser(CONTRACT_ROOT)
     records = tuple(
         parser.parse_line(line).value
-        for line in (CONTRACT_ROOT / "fixtures/scene.v1.jsonl")
+        for line in (CONTRACT_ROOT / "fixtures/scene.v2.jsonl")
         .read_bytes()
         .splitlines(keepends=True)
     )
     assert isinstance(records[0], SceneDefinition)
-    assert isinstance(records[1], SceneFrame)
+    assert isinstance(records[1], SceneSegment)
+    scene_frame = materialize_keyframe(
+        records[0], records[1].right, records[1].right_sequence, records[1].run_id
+    )
     config = SyntheticCameraConfig.from_file()
     config = replace(
         config,
@@ -45,17 +49,17 @@ def test_vtk_backend_renders_perspective_mjpeg_source_frame() -> None:
 
     renderer = VtkPbrRenderer()
     try:
-        frame = renderer.render(records[0], records[1], config)
+        frame = renderer.render(records[0], scene_frame, config)
         updated = renderer.render(
             records[0],
             replace(
-                records[1],
-                sequence=records[1].sequence + 1,
+                scene_frame,
+                sequence=scene_frame.sequence + 1,
                 surface=replace(
-                    records[1].surface,
+                    scene_frame.surface,
                     heights_m=tuple(
                         tuple(height + 0.05 for height in row)
-                        for row in records[1].surface.heights_m
+                        for row in scene_frame.surface.heights_m
                     ),
                 ),
             ),

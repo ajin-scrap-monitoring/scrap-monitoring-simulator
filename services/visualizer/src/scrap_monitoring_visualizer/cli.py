@@ -10,10 +10,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
-from scrap_monitoring_visualizer.limits import (
-    DEFAULT_FRAME_HEIGHT,
-    DEFAULT_FRAME_WIDTH,
-)
 from scrap_monitoring_visualizer.live import LiveConfig, run_live
 from scrap_monitoring_visualizer.synthetic_camera import SyntheticCameraConfig
 
@@ -72,16 +68,6 @@ def build_parser(
         **_environment_argument(values, "HTTP_PORT", required=True),
     )
     live.add_argument(
-        "--width",
-        type=int,
-        **_environment_argument(values, "WIDTH", DEFAULT_FRAME_WIDTH),
-    )
-    live.add_argument(
-        "--height",
-        type=int,
-        **_environment_argument(values, "HEIGHT", DEFAULT_FRAME_HEIGHT),
-    )
-    live.add_argument(
         "--camera-enabled",
         type=_boolean,
         **_environment_argument(values, "CAMERA_ENABLED", "false"),
@@ -119,8 +105,6 @@ def main(
             tcp_port=args.tcp_port,
             http_host=args.http_host,
             http_port=args.http_port,
-            width=args.width,
-            height=args.height,
             synthetic_camera=camera_config,
         )
         live_config.validate()

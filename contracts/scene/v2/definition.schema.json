@@ -1,0 +1,173 @@
+{
+  "$defs": {
+    "coordinate2": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "coordinate3": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "type": "array"
+    },
+    "scene": {
+      "additionalProperties": false,
+      "properties": {
+        "angle_unit": {
+          "const": "deg"
+        },
+        "boundary_xy_m": {
+          "items": {
+            "$ref": "#/$defs/coordinate2"
+          },
+          "minItems": 3,
+          "type": "array"
+        },
+        "coordinate_system": {
+          "const": "right-handed-z-up"
+        },
+        "floor_z_m": {
+          "type": "number"
+        },
+        "inlet_positions_xy_m": {
+          "items": {
+            "$ref": "#/$defs/coordinate2"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "length_unit": {
+          "const": "m"
+        },
+        "sensors": {
+          "items": {
+            "$ref": "#/$defs/sensor"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "surface": {
+          "$ref": "#/$defs/surface"
+        },
+        "top_z_m": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "coordinate_system",
+        "length_unit",
+        "angle_unit",
+        "boundary_xy_m",
+        "floor_z_m",
+        "top_z_m",
+        "inlet_positions_xy_m",
+        "sensors",
+        "surface"
+      ],
+      "type": "object"
+    },
+    "sensor": {
+      "additionalProperties": false,
+      "properties": {
+        "p0_m": {
+          "$ref": "#/$defs/coordinate3"
+        },
+        "sensor_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "u0": {
+          "$ref": "#/$defs/coordinate3"
+        },
+        "u90": {
+          "$ref": "#/$defs/coordinate3"
+        }
+      },
+      "required": [
+        "sensor_id",
+        "p0_m",
+        "u0",
+        "u90"
+      ],
+      "type": "object"
+    },
+    "surface": {
+      "additionalProperties": false,
+      "properties": {
+        "cell_size_m": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "x_coordinates_m": {
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "type": "array"
+        },
+        "y_coordinates_m": {
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "cell_size_m",
+        "x_coordinates_m",
+        "y_coordinates_m"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/ajin-scrap-monitoring/scrap-monitoring-simulator/contracts/scene/v2/definition.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "environment_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "input_fingerprint_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "scene": {
+      "$ref": "#/$defs/scene"
+    },
+    "scene_version": {
+      "const": 2
+    },
+    "seed": {
+      "maximum": 18446744073709551615,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "type": {
+      "const": "scene_definition"
+    }
+  },
+  "required": [
+    "scene_version",
+    "type",
+    "environment_id",
+    "run_id",
+    "input_fingerprint_sha256",
+    "seed",
+    "scene"
+  ],
+  "title": "Canonical scene definition v2",
+  "type": "object"
+}

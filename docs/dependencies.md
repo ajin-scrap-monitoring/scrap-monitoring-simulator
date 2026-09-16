@@ -2,13 +2,13 @@
 
 ## 직접 의존성
 
-Repository가 직접 선택한 의존성은 다음 5개 묶음, 46개 표 항목이다. Service별 표에서 같은
+Repository가 직접 선택한 의존성은 다음 5개 묶음, 49개 표 항목이다. Service별 표에서 같은
 toolchain을 각각 사용하는 경우에는 각 service 항목으로 센다.
 
 | 묶음 | 항목 수 |
 | --- | --- |
 | Simulation server | 11 |
-| Visualizer runtime | 12 |
+| Visualizer runtime | 15 |
 | Camera edge bridge | 6 |
 | Package build와 검증 | 8 |
 | GitHub Actions와 image build | 9 |
@@ -39,14 +39,17 @@ RPLIDAR SDK는 test stage에서만 build하며 Simulation server runtime image�
 | FastAPI | 0.141.1 | HTTP와 WebSocket application | [PyPI](https://pypi.org/project/fastapi/0.141.1/) | MIT |
 | jsonschema | 4.26.0 | Versioned scene 계약 검증 | [PyPI](https://pypi.org/project/jsonschema/4.26.0/) | MIT |
 | NumPy | 2.5.3 | 격자, mesh와 image 효과 수치 배열 | [PyPI](https://pypi.org/project/numpy/2.5.3/) | BSD-3-Clause |
-| Pillow | 12.3.0 | PNG와 JPEG memory encoding | [PyPI](https://pypi.org/project/pillow/12.3.0/) | MIT-CMU |
-| PyVista | 0.49.0 | VTK scene과 off-screen rendering 경계 | [PyPI](https://pypi.org/project/pyvista/0.49.0/) | MIT |
+| Pillow | 12.3.0 | JPEG memory encoding | [PyPI](https://pypi.org/project/pillow/12.3.0/) | MIT-CMU |
+| PyVista | 0.49.0 | 합성 camera VTK scene과 off-screen rendering 경계 | [PyPI](https://pypi.org/project/pyvista/0.49.0/) | MIT |
 | Uvicorn | 0.52.4 | HTTP와 WebSocket ASGI server | [PyPI](https://pypi.org/project/uvicorn/0.52.4/) | BSD-3-Clause |
 | websockets | 17.1 | Uvicorn WebSocket protocol runtime | [PyPI](https://pypi.org/project/websockets/17.1/) | BSD-3-Clause |
-| VTK | 9.7.0 | 직교 및 원근 3D rendering | [PyPI](https://pypi.org/project/vtk/9.7.0/) | BSD-3-Clause |
+| VTK | 9.7.0 | 합성 camera 원근 3D rendering | [PyPI](https://pypi.org/project/vtk/9.7.0/) | BSD-3-Clause |
 | Mesa `libosmesa6` | 22.3.6-1+deb12u2 | CPU off-screen OpenGL context | [Debian](https://packages.debian.org/bookworm/libosmesa6) | MIT 및 구성 요소별 라이선스 |
 | GLVND `libegl1` | 1.6.0-1 | EGL vendor-neutral dispatch | [Debian](https://packages.debian.org/bookworm/libegl1) | MIT 및 구성 요소별 라이선스 |
 | GLVND `libgl1` | 1.6.0-1 | OpenGL vendor-neutral dispatch | [Debian](https://packages.debian.org/bookworm/libgl1) | MIT 및 구성 요소별 라이선스 |
+| Node.js | 24 | Browser bundle build | [Node.js](https://nodejs.org/) | MIT |
+| Three.js | 0.180.0 | Browser WebGL 3D model | [Three.js](https://github.com/mrdoob/three.js) | MIT |
+| TypeScript | 5.9.2 | Browser protocol과 rendering source compile | [TypeScript](https://github.com/microsoft/TypeScript) | Apache-2.0 |
 
 ### Camera edge bridge
 
@@ -97,13 +100,13 @@ Simulation server와 Camera edge bridge는 각각의 `Cargo.lock`, Visualizer는
 | Service | Notice |
 | --- | --- |
 | Simulation server | `services/simulation-server/licenses/THIRD_PARTY_NOTICES.html` |
-| Visualizer | `services/visualizer/THIRD_PARTY_NOTICES.md`와 Python `dist-info` |
+| Visualizer | `services/visualizer/licenses/THIRD_PARTY_NOTICES.html`와 Python `dist-info` |
 | Camera edge bridge | `services/camera-edge-bridge/licenses/THIRD_PARTY_NOTICES.html` |
 
 Rust image는 crate notice와 Rust toolchain `COPYRIGHT.html`을 runtime image에 포함한다.
-Visualizer image는 Python distribution notice와 Debian package notice를 원래 설치 경로에
-유지한다. Release workflow는 각 image에 Software Bill of Materials(SBOM)와 build provenance를
-연결한다.
+Visualizer image는 Browser bundle의 Three.js notice, Python distribution notice와 Debian
+package notice를 포함한다. Release workflow는 각 image에 Software Bill of Materials(SBOM)와
+build provenance를 연결한다.
 
 ## Edge host 의존성
 

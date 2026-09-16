@@ -1,4 +1,4 @@
-"""SceneFrame contract models and validation."""
+"""Scene segment contract models and validation."""
 
 from .models import (
     ParsedRecord,
@@ -6,8 +6,12 @@ from .models import (
     Scene,
     SceneDefinition,
     SceneFrame,
+    SceneKeyframe,
+    SceneSegment,
     Sensor,
     Surface,
+    SurfaceGrid,
+    materialize_keyframe,
 )
 from .parser import ContractError, ContractParser
 
@@ -16,9 +20,13 @@ __all__ = [
     "ContractParser",
     "SceneDefinition",
     "SceneFrame",
+    "SceneKeyframe",
+    "SceneSegment",
     "ParsedRecord",
     "Scenario",
     "Scene",
     "Sensor",
     "Surface",
+    "SurfaceGrid",
+    "materialize_keyframe",
 ]

@@ -70,6 +70,7 @@ pub struct GenerationBatch {
     pub completed_at_s: f64,
     pub scans: Vec<MeasurementResult>,
     pub scenario_transitions: Vec<ScenarioPhaseTransition>,
+    pub canonical_keyframes: Vec<ScenarioModelSnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -203,7 +204,8 @@ impl GenerationRuntime {
         if !completion_s.is_finite() {
             return Err(GenerationRuntimeError::SensorConfiguration);
         }
-        let scenario_transitions = self.advance_scenario_and_distortions(completion_s)?;
+        let (scenario_transitions, canonical_keyframes) =
+            self.advance_scenario_and_distortions(completion_s)?;
 
         let snapshots = Arc::new(self.snapshots.clone());
         let spatial = self
@@ -322,19 +324,21 @@ impl GenerationRuntime {
             completed_at_s: completion_s,
             scans,
             scenario_transitions,
+            canonical_keyframes,
         })
     }
 
     fn advance_scenario_and_distortions(
         &mut self,
         through_s: f64,
-    ) -> Result<Vec<ScenarioPhaseTransition>> {
+    ) -> Result<(Vec<ScenarioPhaseTransition>, Vec<ScenarioModelSnapshot>)> {
         let mut scenario = self.scenario.clone();
         let mut snapshots = self.snapshots.clone();
         let mut spatial = self.spatial.clone();
         let scenario_event_limit = scenario.event_output_limit()?;
         let mut scenario_events = 0_usize;
         let mut transitions = Vec::new();
+        let mut canonical_keyframes = Vec::new();
 
         while scenario.elapsed_s() < through_s {
             let started_at_s = scenario.elapsed_s();
@@ -370,6 +374,7 @@ impl GenerationRuntime {
                         phase: event.model.state.phase,
                     });
                 }
+                canonical_keyframes.push(event.model.clone());
                 snapshots.push_event(event.elapsed_s, event.model.surface)?;
             }
         }
@@ -377,7 +382,7 @@ impl GenerationRuntime {
         self.scenario = scenario;
         self.snapshots = snapshots;
         self.spatial = spatial;
-        Ok(transitions)
+        Ok((transitions, canonical_keyframes))
     }
 
     pub fn shutdown(&mut self) -> Result<()> {

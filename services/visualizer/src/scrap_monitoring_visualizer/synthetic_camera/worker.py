@@ -32,6 +32,7 @@ class CameraRenderOutcome:
     render_backend: str | None
     render_seconds: float
     error: str | None
+    target_id: int = 0
 
 
 def _render(
@@ -50,6 +51,7 @@ def _render(
         )
         return CameraRenderOutcome(
             generation=generation,
+            target_id=request.frame.target_id,
             sequence=rendered.sequence,
             elapsed_s=rendered.elapsed_s,
             mode=request.frame.mode,
@@ -62,6 +64,7 @@ def _render(
     except Exception as error:
         return CameraRenderOutcome(
             generation=generation,
+            target_id=request.frame.target_id,
             sequence=frame.sequence,
             elapsed_s=frame.scenario.elapsed_s,
             mode=request.frame.mode,
