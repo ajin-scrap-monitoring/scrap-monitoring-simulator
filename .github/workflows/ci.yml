@@ -27,8 +27,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate repository structure
-        run: python3 tools/check_repository.py
+      - name: Validate agent entrypoints
+        shell: bash
+        run: |
+          test -f .agents/AGENTS.md
+          test -L AGENTS.md
+          test "$(readlink AGENTS.md)" = ".agents/AGENTS.md"
+          test -L GEMINI.md
+          test "$(readlink GEMINI.md)" = ".agents/AGENTS.md"
+          test -L .claude/CLAUDE.md
+          test "$(readlink .claude/CLAUDE.md)" = "../.agents/AGENTS.md"
 
-      - name: Compile validation tools
-        run: python3 -m compileall -q tools
+      - name: Validate changed whitespace
+        run: git diff-tree --check --root -r HEAD

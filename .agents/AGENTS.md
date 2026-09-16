@@ -57,8 +57,5 @@ backpressure를 전달하지 않는다.
 ## 작업 검증
 
 변경 범위에 해당하는 자동 검사를 실행하고 실행하지 않은 검사를 완료로 표시하지 않는다.
-Repository 구조와 문서를 변경하면 루트에서 다음 명령을 실행한다.
-
-```bash
-python3 tools/check_repository.py
-```
+CI는 에이전트 진입점과 변경 whitespace를 확인한다. 제품 구현의 build, 정적 검사와
+test는 Container 경계에서 실행하고 Host에 언어 runtime을 사전 의존성으로 추가하지 않는다.
