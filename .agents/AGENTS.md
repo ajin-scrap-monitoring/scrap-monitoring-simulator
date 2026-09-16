@@ -4,7 +4,6 @@
 
 이 파일은 이 저장소의 프로젝트 지침 단일 소스다. 전역 행동 지침을 함께 적용한다.
 `AGENTS.md`, `GEMINI.md`와 `.claude/CLAUDE.md`는 이 파일을 가리키는 심링크다.
-Antigravity는 `.agents/rules/project.md`에서 이 파일을 참조한다.
 
 ## 제품 경계
 
@@ -41,8 +40,10 @@ GitHub 작업에는 조직 `.github` 저장소의 최신
 [ruleset 적용 절차](https://github.com/ajin-scrap-monitoring/.github/blob/main/rulesets/README.md)를
 적용한다. 공통 문서와 template을 이 저장소에 복제하지 않는다.
 
-기능과 설정 변경은 대상 저장소 Issue, 최신 `main` 기반 작업 branch, 검증, Pull Request,
-squash merge 순서로 처리한다. 원격 `main`에 직접 Push하거나 보호 규칙을 우회하지 않는다.
+하나의 목표와 공동 완료 조건으로 검증할 수 있는 관련 변경은 하나의 Issue, 작업 branch와
+Pull Request로 묶는다. 단발성 세부 항목마다 별도 Issue나 Pull Request를 만들지 않는다.
+최신 `main` 기반 작업 branch, 검증, Pull Request와 squash merge 순서로 처리한다. 원격
+`main`에 직접 Push하거나 보호 규칙을 우회하지 않는다.
 
 ## 데이터와 구현 경계
 

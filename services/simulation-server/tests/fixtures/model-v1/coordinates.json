@@ -1,0 +1,598 @@
+{
+  "comparison_class": "rng-independent",
+  "deposited_surface": "height-field-operations.json operations[1]",
+  "measurements": [
+    {
+      "angle_deg": 0.0,
+      "direction": {
+        "x": 0.0,
+        "y": -0.2241476929214269,
+        "z": -0.9745551866148995
+      },
+      "hit": {
+        "distance_m": 10.261091559868278,
+        "kind": "floor",
+        "position_m": {
+          "x": 0.5,
+          "y": 0.19999999999999973,
+          "z": 0.0
+        }
+      },
+      "requested_angle_deg": 0.0,
+      "scene": "empty",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 15.0018310546875,
+      "direction": {
+        "x": -0.25884991396326595,
+        "y": -0.21650819138767433,
+        "z": -0.9413399625551058
+      },
+      "hit": {
+        "distance_m": 1.9316212717418797,
+        "kind": "wall",
+        "position_m": {
+          "x": 5.551115123125783e-17,
+          "y": 2.0817881720092064,
+          "z": 8.181687704387853
+        }
+      },
+      "requested_angle_deg": 15.0,
+      "scene": "empty",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 45.0,
+      "direction": {
+        "x": -0.7071067811865475,
+        "y": -0.1584963536520609,
+        "z": -0.689114581095917
+      },
+      "hit": {
+        "distance_m": 0.7071067811865476,
+        "kind": "wall",
+        "position_m": {
+          "x": 0.0,
+          "y": 2.3879261535392864,
+          "z": 9.51272240669255
+        }
+      },
+      "requested_angle_deg": 45.0,
+      "scene": "empty",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 90.0,
+      "direction": {
+        "x": -1.0,
+        "y": -1.3725087733624467e-17,
+        "z": -5.967429449401942e-17
+      },
+      "hit": {
+        "distance_m": 0.5,
+        "kind": "wall",
+        "position_m": {
+          "x": 0.0,
+          "y": 2.5,
+          "z": 10.0
+        }
+      },
+      "requested_angle_deg": 90.0,
+      "scene": "empty",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 135.0,
+      "direction": {
+        "x": -0.7071067811865476,
+        "y": 0.15849635365206088,
+        "z": 0.6891145810959168
+      },
+      "hit": null,
+      "requested_angle_deg": 135.0,
+      "scene": "empty",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 180.0,
+      "direction": {
+        "x": -1.224646799147353e-16,
+        "y": 0.2241476929214269,
+        "z": 0.9745551866148995
+      },
+      "hit": null,
+      "requested_angle_deg": 180.0,
+      "scene": "empty",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 225.0,
+      "direction": {
+        "x": 0.7071067811865474,
+        "y": 0.15849635365206088,
+        "z": 0.689114581095917
+      },
+      "hit": null,
+      "requested_angle_deg": 225.0,
+      "scene": "empty",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 270.0,
+      "direction": {
+        "x": 1.0,
+        "y": 4.11752632008734e-17,
+        "z": 1.7902288348205824e-16
+      },
+      "hit": {
+        "distance_m": 1.3999999999999997,
+        "kind": "wall",
+        "position_m": {
+          "x": 1.8999999999999997,
+          "y": 2.5,
+          "z": 10.0
+        }
+      },
+      "requested_angle_deg": 270.0,
+      "scene": "empty",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 315.0,
+      "direction": {
+        "x": 0.7071067811865477,
+        "y": -0.15849635365206086,
+        "z": -0.6891145810959167
+      },
+      "hit": {
+        "distance_m": 4.949747468305831,
+        "kind": "wall",
+        "position_m": {
+          "x": 3.9999999999999996,
+          "y": 1.715483074775006,
+          "z": 6.589056846847853
+        }
+      },
+      "requested_angle_deg": 315.0,
+      "scene": "empty",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 0.0,
+      "direction": {
+        "x": 0.0,
+        "y": -0.2241476929214269,
+        "z": -0.9745551866148995
+      },
+      "hit": {
+        "distance_m": 4.897843773960138,
+        "kind": "surface",
+        "position_m": {
+          "x": 0.5,
+          "y": 1.4021596177772604,
+          "z": 5.226780946857654
+        }
+      },
+      "requested_angle_deg": 0.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 15.0018310546875,
+      "direction": {
+        "x": -0.25884991396326595,
+        "y": -0.21650819138767433,
+        "z": -0.9413399625551058
+      },
+      "hit": {
+        "distance_m": 1.9316212717418797,
+        "kind": "wall",
+        "position_m": {
+          "x": 5.551115123125783e-17,
+          "y": 2.0817881720092064,
+          "z": 8.181687704387853
+        }
+      },
+      "requested_angle_deg": 15.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 45.0,
+      "direction": {
+        "x": -0.7071067811865475,
+        "y": -0.1584963536520609,
+        "z": -0.689114581095917
+      },
+      "hit": {
+        "distance_m": 0.7071067811865476,
+        "kind": "wall",
+        "position_m": {
+          "x": 0.0,
+          "y": 2.3879261535392864,
+          "z": 9.51272240669255
+        }
+      },
+      "requested_angle_deg": 45.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 90.0,
+      "direction": {
+        "x": -1.0,
+        "y": -1.3725087733624467e-17,
+        "z": -5.967429449401942e-17
+      },
+      "hit": {
+        "distance_m": 0.5,
+        "kind": "wall",
+        "position_m": {
+          "x": 0.0,
+          "y": 2.5,
+          "z": 10.0
+        }
+      },
+      "requested_angle_deg": 90.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 135.0,
+      "direction": {
+        "x": -0.7071067811865476,
+        "y": 0.15849635365206088,
+        "z": 0.6891145810959168
+      },
+      "hit": null,
+      "requested_angle_deg": 135.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 180.0,
+      "direction": {
+        "x": -1.224646799147353e-16,
+        "y": 0.2241476929214269,
+        "z": 0.9745551866148995
+      },
+      "hit": null,
+      "requested_angle_deg": 180.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 225.0,
+      "direction": {
+        "x": 0.7071067811865474,
+        "y": 0.15849635365206088,
+        "z": 0.689114581095917
+      },
+      "hit": null,
+      "requested_angle_deg": 225.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 270.0,
+      "direction": {
+        "x": 1.0,
+        "y": 4.11752632008734e-17,
+        "z": 1.7902288348205824e-16
+      },
+      "hit": {
+        "distance_m": 1.3999999999999997,
+        "kind": "wall",
+        "position_m": {
+          "x": 1.8999999999999997,
+          "y": 2.5,
+          "z": 10.0
+        }
+      },
+      "requested_angle_deg": 270.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 315.0,
+      "direction": {
+        "x": 0.7071067811865477,
+        "y": -0.15849635365206086,
+        "z": -0.6891145810959167
+      },
+      "hit": {
+        "distance_m": 4.949747468305831,
+        "kind": "wall",
+        "position_m": {
+          "x": 3.9999999999999996,
+          "y": 1.715483074775006,
+          "z": 6.589056846847853
+        }
+      },
+      "requested_angle_deg": 315.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_1"
+    },
+    {
+      "angle_deg": 0.0,
+      "direction": {
+        "x": 0.14834045293024462,
+        "y": 0.0,
+        "z": -0.9889363528682975
+      },
+      "hit": {
+        "distance_m": 10.111874208078342,
+        "kind": "floor",
+        "position_m": {
+          "x": 3.8,
+          "y": 3.9,
+          "z": 0.0
+        }
+      },
+      "requested_angle_deg": 0.0,
+      "scene": "empty",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 15.0018310546875,
+      "direction": {
+        "x": 0.14328464752396097,
+        "y": -0.258849913963266,
+        "z": -0.9552309834930733
+      },
+      "hit": {
+        "distance_m": 10.468672156583699,
+        "kind": "floor",
+        "position_m": {
+          "x": 3.7999999999999994,
+          "y": 1.190185112958671,
+          "z": 0.0
+        }
+      },
+      "requested_angle_deg": 15.0,
+      "scene": "empty",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 45.0,
+      "direction": {
+        "x": 0.10489254019125983,
+        "y": -0.7071067811865475,
+        "z": -0.6992836012750656
+      },
+      "hit": {
+        "distance_m": 5.515432893255071,
+        "kind": "wall",
+        "position_m": {
+          "x": 2.878527766427954,
+          "y": 0.0,
+          "z": 6.14314822381364
+        }
+      },
+      "requested_angle_deg": 45.0,
+      "scene": "empty",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 90.0,
+      "direction": {
+        "x": 9.083233043254634e-18,
+        "y": -1.0,
+        "z": -6.05548869550309e-17
+      },
+      "hit": {
+        "distance_m": 3.9000000000000004,
+        "kind": "wall",
+        "position_m": {
+          "x": 2.3,
+          "y": -4.440892098500626e-16,
+          "z": 10.0
+        }
+      },
+      "requested_angle_deg": 90.0,
+      "scene": "empty",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 135.0,
+      "direction": {
+        "x": -0.10489254019125982,
+        "y": -0.7071067811865476,
+        "z": 0.6992836012750655
+      },
+      "hit": null,
+      "requested_angle_deg": 135.0,
+      "scene": "empty",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 180.0,
+      "direction": {
+        "x": -0.14834045293024462,
+        "y": -1.2246467991473532e-16,
+        "z": 0.9889363528682975
+      },
+      "hit": null,
+      "requested_angle_deg": 180.0,
+      "scene": "empty",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 225.0,
+      "direction": {
+        "x": -0.10489254019125986,
+        "y": 0.7071067811865475,
+        "z": 0.6992836012750657
+      },
+      "hit": null,
+      "requested_angle_deg": 225.0,
+      "scene": "empty",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 270.0,
+      "direction": {
+        "x": -2.72496991297639e-17,
+        "y": 1.0,
+        "z": 1.8166466086509268e-16
+      },
+      "hit": null,
+      "requested_angle_deg": 270.0,
+      "scene": "empty",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 315.0,
+      "direction": {
+        "x": 0.1048925401912598,
+        "y": 0.7071067811865477,
+        "z": -0.6992836012750654
+      },
+      "hit": null,
+      "requested_angle_deg": 315.0,
+      "scene": "empty",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 0.0,
+      "direction": {
+        "x": 0.14834045293024462,
+        "y": 0.0,
+        "z": -0.9889363528682975
+      },
+      "hit": {
+        "distance_m": 9.29934815806977,
+        "kind": "surface",
+        "position_m": {
+          "x": 3.6794695177241055,
+          "y": 3.9,
+          "z": 0.80353654850596
+        }
+      },
+      "requested_angle_deg": 0.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 15.0018310546875,
+      "direction": {
+        "x": 0.14328464752396097,
+        "y": -0.258849913963266,
+        "z": -0.9552309834930733
+      },
+      "hit": {
+        "distance_m": 7.885493023648024,
+        "kind": "surface",
+        "position_m": {
+          "x": 3.4298700884460604,
+          "y": 1.8588408092707747,
+          "z": 2.467532743692929
+        }
+      },
+      "requested_angle_deg": 15.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 45.0,
+      "direction": {
+        "x": 0.10489254019125983,
+        "y": -0.7071067811865475,
+        "z": -0.6992836012750656
+      },
+      "hit": {
+        "distance_m": 5.515432893255071,
+        "kind": "wall",
+        "position_m": {
+          "x": 2.878527766427954,
+          "y": 0.0,
+          "z": 6.14314822381364
+        }
+      },
+      "requested_angle_deg": 45.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 90.0,
+      "direction": {
+        "x": 9.083233043254634e-18,
+        "y": -1.0,
+        "z": -6.05548869550309e-17
+      },
+      "hit": {
+        "distance_m": 3.9000000000000004,
+        "kind": "wall",
+        "position_m": {
+          "x": 2.3,
+          "y": -4.440892098500626e-16,
+          "z": 10.0
+        }
+      },
+      "requested_angle_deg": 90.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 135.0,
+      "direction": {
+        "x": -0.10489254019125982,
+        "y": -0.7071067811865476,
+        "z": 0.6992836012750655
+      },
+      "hit": null,
+      "requested_angle_deg": 135.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 180.0,
+      "direction": {
+        "x": -0.14834045293024462,
+        "y": -1.2246467991473532e-16,
+        "z": 0.9889363528682975
+      },
+      "hit": null,
+      "requested_angle_deg": 180.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 225.0,
+      "direction": {
+        "x": -0.10489254019125986,
+        "y": 0.7071067811865475,
+        "z": 0.6992836012750657
+      },
+      "hit": null,
+      "requested_angle_deg": 225.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 270.0,
+      "direction": {
+        "x": -2.72496991297639e-17,
+        "y": 1.0,
+        "z": 1.8166466086509268e-16
+      },
+      "hit": null,
+      "requested_angle_deg": 270.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_2"
+    },
+    {
+      "angle_deg": 315.0,
+      "direction": {
+        "x": 0.1048925401912598,
+        "y": 0.7071067811865477,
+        "z": -0.6992836012750654
+      },
+      "hit": null,
+      "requested_angle_deg": 315.0,
+      "scene": "deposited",
+      "sensor_id": "lidar_2"
+    }
+  ]
+}

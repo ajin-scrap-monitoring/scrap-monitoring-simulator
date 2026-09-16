@@ -1,0 +1,34 @@
+[package]
+name = "scrap-monitoring-simulation-server"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+description = "Canonical scene simulator with RPLIDAR S2E-compatible UDP output."
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "scrap-monitoring-simulation-server"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "=4.6.6", features = ["derive", "env"] }
+num-bigint = "=0.4.8"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["arbitrary_precision", "raw_value"] }
+sha2 = "=0.11.0"
+thiserror = "=2.0.20"
+tokio = { version = "=1.53.1", default-features = false, features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+uuid = { version = "=1.26.1", default-features = false, features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

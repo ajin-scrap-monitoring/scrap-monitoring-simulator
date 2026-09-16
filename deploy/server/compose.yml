@@ -1,0 +1,65 @@
+services:
+  simulation-server:
+    container_name: scrap-monitoring-simulator-server
+    image: ${SCRAP_SIMULATION_SERVER_IMAGE:?release image digest is required}
+    environment:
+      SCRAP_SIMULATOR_SCENE_HOST: visualizer
+      SCRAP_SIMULATOR_SCENE_PORT: "17000"
+      SCRAP_SIMULATOR_SCENE_INTERVAL_S: ${SCRAP_SIMULATOR_SCENE_INTERVAL_S:-1.0}
+    ports:
+      - ${SCRAP_SIMULATOR_LIDAR_1_PORT:-8089}:8089/udp
+      - ${SCRAP_SIMULATOR_LIDAR_2_PORT:-8090}:8090/udp
+    depends_on:
+      visualizer:
+        condition: service_healthy
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    mem_limit: 512m
+    cpus: 2.0
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    restart: unless-stopped
+    stop_grace_period: 15s
+
+  visualizer:
+    container_name: scrap-monitoring-simulator-visualizer
+    image: ${SCRAP_SIMULATOR_VISUALIZER_IMAGE:?release image digest is required}
+    command:
+      - live
+    environment:
+      SCRAP_MONITORING_VISUALIZER_TCP_HOST: 0.0.0.0
+      SCRAP_MONITORING_VISUALIZER_TCP_PORT: "17000"
+      SCRAP_MONITORING_VISUALIZER_HTTP_HOST: 0.0.0.0
+      SCRAP_MONITORING_VISUALIZER_HTTP_PORT: "18000"
+      SCRAP_MONITORING_VISUALIZER_CAMERA_ENABLED: "true"
+      SCRAP_MONITORING_VISUALIZER_CAMERA_BACKEND: ${SCRAP_MONITORING_VISUALIZER_CAMERA_BACKEND:-osmesa}
+    ports:
+      - ${SCRAP_SIMULATOR_BROWSER_PORT:-18000}:18000/tcp
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m
+    mem_limit: 4g
+    cpus: 4.0
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    restart: unless-stopped
+    stop_grace_period: 30s

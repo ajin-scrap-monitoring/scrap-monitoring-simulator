@@ -1,0 +1,31 @@
+services:
+  synthetic-camera-bridge:
+    container_name: scrap-monitoring-simulator-camera-edge-bridge
+    image: ${SCRAP_SYNTHETIC_CAMERA_BRIDGE_IMAGE:?release image digest is required}
+    environment:
+      SCRAP_SYNTHETIC_CAMERA_SERVER_URL: ${SCRAP_SYNTHETIC_CAMERA_SERVER_URL:?server URL is required}
+      SCRAP_SYNTHETIC_CAMERA_DEVICE: ${SCRAP_SYNTHETIC_CAMERA_DEVICE:-/dev/scrap-synthetic-camera}
+      SCRAP_SYNTHETIC_CAMERA_CONNECT_TIMEOUT_MS: ${SCRAP_SYNTHETIC_CAMERA_CONNECT_TIMEOUT_MS:-5000}
+      SCRAP_SYNTHETIC_CAMERA_IO_TIMEOUT_MS: ${SCRAP_SYNTHETIC_CAMERA_IO_TIMEOUT_MS:-1000}
+      SCRAP_SYNTHETIC_CAMERA_RECONNECT_INITIAL_MS: ${SCRAP_SYNTHETIC_CAMERA_RECONNECT_INITIAL_MS:-500}
+      SCRAP_SYNTHETIC_CAMERA_RECONNECT_MAX_MS: ${SCRAP_SYNTHETIC_CAMERA_RECONNECT_MAX_MS:-30000}
+    devices:
+      - /dev/video42:${SCRAP_SYNTHETIC_CAMERA_DEVICE:-/dev/scrap-synthetic-camera}:rwm
+    group_add:
+      - ${SCRAP_SYNTHETIC_CAMERA_VIDEO_GID:-44}
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 32
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    restart: unless-stopped
+    stop_grace_period: 15s
