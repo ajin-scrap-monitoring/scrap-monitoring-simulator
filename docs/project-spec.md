@@ -31,6 +31,14 @@ Visualizer는 정적 scene definition을 한 번 구성하고 동적 scene frame
 장면 상태를 갱신한다. Browser와 camera client의 처리 지연은 simulation과 UDP scan을
 중단시키지 않는다.
 
+Browser는 고정 사선 직교투영 3D 모델과 현장 camera 시점의 live 영상을 한 페이지에
+표시한다. Camera stream은 1920 x 1080, 30 FPS MJPEG며 edge bridge는 완전한 JPEG
+frame을 `/dev/scrap-synthetic-camera` V4L2 device에 기록한다. Bridge는 연결 단위
+descriptor를 검증하고 최신 frame 1개만 유지하며, V4L2가 제공하는 sequence와
+monotonic EOF timestamp를 소비자의 시간 정렬 기준으로 사용한다.
+
+이 제품은 Observation, JPEG, 영상과 replay 파일을 저장하지 않고 live 출력만 제공한다.
+
 ## 공개 범위
 
 공개 합성 설정, protocol 호환 코드와 자동 검증 자료만 Repository에 포함한다. 실제 현장
@@ -42,6 +50,6 @@ Visualizer는 정적 scene definition을 한 번 구성하고 동적 scene frame
 - 고정한 RPLIDAR SDK를 통한 장비 정보, 상태, scan 시작과 HQ scan 검증
 - 실제 edge driver를 변경하지 않은 센서 2대 동시 수집
 - Browser 3D 화면과 합성 camera live stream 제공
-- ARM64 V4L2 camera 입력 검증
+- 1920 x 1080, 30 FPS MJPEG와 ARM64 V4L2 camera 입력 검증
 - bounded queue, 장애 격리와 자원 상한 검증
 - AMD64 및 ARM64 OCI image의 CI와 version release

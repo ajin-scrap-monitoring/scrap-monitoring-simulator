@@ -7,9 +7,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / ".agents" / "AGENTS.md"
 REQUIRED_FILES = (
     ROOT / "README.md",
+    ROOT / ".github" / "workflows" / "ci.yml",
     ROOT / "docs" / "project-spec.md",
     ROOT / "docs" / "architecture.md",
     ROOT / "docs" / "development-plan.md",
+    ROOT / "docs" / "source-baselines.md",
     ROOT / ".agents" / "rules" / "project.md",
 )
 ENTRYPOINTS = {

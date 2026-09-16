@@ -18,7 +18,7 @@ platform의 SDK driver와 처리 서비스는 `ajin-edge-platform`이 소유한�
 
 ## 문서 정본
 
-프로젝트 정본은 다음 4개다.
+프로젝트 정본은 다음 5개다.
 
 | 문서 | 책임 |
 | --- | --- |
@@ -26,6 +26,7 @@ platform의 SDK driver와 처리 서비스는 `ajin-edge-platform`이 소유한�
 | [프로젝트 명세](../docs/project-spec.md) | 제품 범위, 외부 경계와 완료 조건 |
 | [아키텍처](../docs/architecture.md) | 상태 소유권, process와 package 경계 |
 | [개발 계획](../docs/development-plan.md) | 현재 구현 상태와 작업 순서 |
+| [구현 입력 기준](../docs/source-baselines.md) | 이관 입력의 Repository, commit과 적용 경계 |
 
 작업을 시작할 때 프로젝트 명세와 개발 계획을 읽고 아키텍처 경계를 확인한다. 설계나 구현
 상태가 달라지면 책임을 가진 정본만 갱신하고 같은 사실을 여러 문서에 복제하지 않는다.
