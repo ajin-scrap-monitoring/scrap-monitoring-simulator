@@ -33,6 +33,7 @@ _INDEX_HTML = """<!doctype html>
     .metric{background:#fff;border:1px solid #dadce0;padding:10px 12px}
     dt{color:#5f6368;font-size:12px;margin-bottom:4px}
     dd{font-variant-numeric:tabular-nums;margin:0}
+    sup{font-size:.5em;line-height:0}
     @media(max-width:900px){.views{grid-template-columns:1fr}}
     @media(max-width:900px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
   </style>
@@ -46,7 +47,7 @@ _INDEX_HTML = """<!doctype html>
     </figure>
     <figure>
       <figcaption><span>Synthetic camera</span></figcaption>
-      <img class="visual" id="camera" alt="Live synthetic camera frame">
+      <canvas class="visual" id="camera" width="960" height="540" aria-label="Live synthetic camera frame"></canvas>
     </figure>
   </section>
   <dl class="metrics" aria-label="Shared scene values">
@@ -70,27 +71,115 @@ let displayedRevision=null;
 let cameraEnabled=false;
 let cameraSocket=null;
 let cameraDescriptor=null;
-let cameraVisibleUrl=null;
 let cameraPendingBlob=null;
 let cameraDecoding=false;
+let cameraReadyBitmap=null;
 let cameraRetryTimer=null;
+let cameraGeneration=0;
+let cameraSourceFps=null;
+let cameraSourceWindowS=null;
+const cameraPreviewWidth=960;
+const cameraPreviewHeight=540;
+const cameraBitmapContext=camera.getContext("bitmaprenderer");
+const cameraFallbackContext=cameraBitmapContext===null?camera.getContext("2d"):null;
+const cameraMetricWindowMs=5000;
+const cameraMetricTimes={received:[],decoded:[],presented:[]};
+const cameraMetricTotals={received:0,decoded:0,presented:0,dropped_before_decode:0,dropped_before_present:0,decode_errors:0};
+
+function recordCameraMetric(name){
+  const now=performance.now();
+  const values=cameraMetricTimes[name];
+  values.push(now);
+  while(values.length>0&&values[0]<now-cameraMetricWindowMs)values.shift();
+  cameraMetricTotals[name]++;
+}
+
+function cameraMetricRate(values,now){
+  while(values.length>0&&values[0]<now-cameraMetricWindowMs)values.shift();
+  if(values.length<2)return 0;
+  return (values.length-1)*1000/(values[values.length-1]-values[0]);
+}
+
+window.__scrapCameraMetrics={
+  snapshot(){
+    const now=performance.now();
+    return {
+      version:1,
+      sampled_at_ms:now,
+      window_s:cameraMetricWindowMs/1000,
+      source:{rendered_fps:cameraSourceFps,window_s:cameraSourceWindowS},
+      network:{
+        received_frames:cameraMetricTotals.received,
+        received_fps:cameraMetricRate(cameraMetricTimes.received,now)
+      },
+      browser:{
+        decoded_frames:cameraMetricTotals.decoded,
+        decoded_fps:cameraMetricRate(cameraMetricTimes.decoded,now),
+        presented_frames:cameraMetricTotals.presented,
+        presented_fps:cameraMetricRate(cameraMetricTimes.presented,now),
+        presented_last_second:cameraMetricTimes.presented.filter(value=>value>=now-1000).length,
+        dropped_before_decode:cameraMetricTotals.dropped_before_decode,
+        dropped_before_present:cameraMetricTotals.dropped_before_present,
+        decode_errors:cameraMetricTotals.decode_errors
+      },
+      queues:{
+        pending_decode:cameraPendingBlob===null?0:1,
+        decode_inflight:cameraDecoding?1:0,
+        pending_present:cameraReadyBitmap===null?0:1
+      }
+    };
+  }
+};
 
 async function displayLatestCameraFrame(){
-  if(cameraDecoding)return;
+  if(cameraDecoding||cameraReadyBitmap!==null)return;
+  const blob=cameraPendingBlob;
+  if(blob===null)return;
+  cameraPendingBlob=null;
   cameraDecoding=true;
-  while(cameraPendingBlob!==null){
-    const blob=cameraPendingBlob;
-    cameraPendingBlob=null;
-    const nextUrl=URL.createObjectURL(blob);
-    await new Promise(resolve=>{
-      camera.onload=resolve;
-      camera.onerror=resolve;
-      camera.src=nextUrl;
-    });
-    if(cameraVisibleUrl!==null)URL.revokeObjectURL(cameraVisibleUrl);
-    cameraVisibleUrl=nextUrl;
+  const generation=cameraGeneration;
+  try{
+    let bitmap;
+    try{
+      bitmap=await createImageBitmap(blob,{
+        resizeWidth:cameraPreviewWidth,
+        resizeHeight:cameraPreviewHeight,
+        resizeQuality:"high"
+      });
+    }catch(error){
+      cameraMetricTotals.decode_errors++;
+      return;
+    }
+    if(generation!==cameraGeneration){
+      bitmap.close();
+      return;
+    }
+    recordCameraMetric("decoded");
+    if(cameraReadyBitmap!==null){
+      cameraMetricTotals.dropped_before_present++;
+      cameraReadyBitmap.close();
+    }
+    cameraReadyBitmap=bitmap;
+  }finally{
+    cameraDecoding=false;
+    if(cameraReadyBitmap===null&&cameraPendingBlob!==null)displayLatestCameraFrame();
   }
-  cameraDecoding=false;
+}
+
+function presentLatestCameraFrame(){
+  if(cameraReadyBitmap!==null){
+    const bitmap=cameraReadyBitmap;
+    cameraReadyBitmap=null;
+    if(cameraBitmapContext!==null){
+      cameraBitmapContext.transferFromImageBitmap(bitmap);
+    }else if(cameraFallbackContext!==null){
+      cameraFallbackContext.drawImage(bitmap,0,0,camera.width,camera.height);
+      bitmap.close();
+    }
+    recordCameraMetric("presented");
+    if(cameraPendingBlob!==null)displayLatestCameraFrame();
+  }
+  requestAnimationFrame(presentLatestCameraFrame);
 }
 
 function reconnectCamera(){
@@ -105,13 +194,16 @@ function connectCamera(){
   url.protocol=window.location.protocol==="https:"?"wss:":"ws:";
   const socket=new WebSocket(url);
   cameraSocket=socket;
+  cameraGeneration++;
   socket.binaryType="blob";
   socket.onmessage=event=>{
     if(typeof event.data==="string"){
       try{
         const value=JSON.parse(event.data);
-        if(value.type!=="camera_stream_descriptor"||value.version!==1||value.format!=="MJPEG")throw new Error("Unsupported camera stream.");
+        if(value.type!=="camera_stream_descriptor"||value.version!==1||value.format!=="MJPEG"||value.width!==1920||value.height!==1080||value.fps!==30)throw new Error("Unsupported camera stream.");
         cameraDescriptor=value;
+        camera.width=cameraPreviewWidth;
+        camera.height=cameraPreviewHeight;
       }catch(error){
         socket.close(1002,"invalid descriptor");
       }
@@ -121,12 +213,18 @@ function connectCamera(){
       socket.close(1002,"descriptor required");
       return;
     }
+    recordCameraMetric("received");
+    if(cameraPendingBlob!==null)cameraMetricTotals.dropped_before_decode++;
     cameraPendingBlob=event.data;
     displayLatestCameraFrame();
   };
   socket.onerror=()=>socket.close();
   socket.onclose=()=>{
-    if(cameraSocket===socket)cameraSocket=null;
+    if(cameraSocket===socket){
+      cameraSocket=null;
+      cameraGeneration++;
+      cameraPendingBlob=null;
+    }
     if(cameraEnabled){
       reconnectCamera();
     }
@@ -142,7 +240,7 @@ function displaySceneValues(scene){
   metricSequence.textContent=String(scene.sequence);
   metricElapsed.textContent=scene.elapsed_s.toFixed(1)+" s";
   metricFill.textContent=(scene.surface_fill_ratio*100).toFixed(1)+" %";
-  metricVolume.textContent=scene.surface_volume_m3.toFixed(2)+" m3";
+  metricVolume.innerHTML=scene.surface_volume_m3.toFixed(2)+" m<sup>3</sup>";
   metricPhase.textContent=scene.phase;
   metricCycleInlet.textContent=String(scene.cycle_index)+" / "+inlet;
 }
@@ -153,6 +251,8 @@ async function refresh(){
     const status=await response.json();
     displaySceneValues(status.scene);
     cameraEnabled=status.synthetic_camera?.camera_enabled===true;
+    cameraSourceFps=Number.isFinite(status.synthetic_camera?.camera_source_fps)?status.synthetic_camera.camera_source_fps:null;
+    cameraSourceWindowS=Number.isFinite(status.synthetic_camera?.camera_source_fps_window_s)?status.synthetic_camera.camera_source_fps_window_s:null;
     if(cameraEnabled){
       connectCamera();
     }else{
@@ -173,8 +273,10 @@ window.addEventListener("beforeunload",()=>{
   cameraEnabled=false;
   clearTimeout(cameraRetryTimer);
   if(cameraSocket!==null)cameraSocket.close();
-  if(cameraVisibleUrl!==null)URL.revokeObjectURL(cameraVisibleUrl);
+  cameraGeneration++;
+  if(cameraReadyBitmap!==null)cameraReadyBitmap.close();
 });
+requestAnimationFrame(presentLatestCameraFrame);
 refresh();
 </script></body></html>
 """

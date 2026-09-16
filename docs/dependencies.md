@@ -2,7 +2,7 @@
 
 ## 직접 의존성
 
-Repository가 직접 선택한 의존성은 다음 5개 묶음, 47개 표 항목이다. Service별 표에서 같은
+Repository가 직접 선택한 의존성은 다음 5개 묶음, 46개 표 항목이다. Service별 표에서 같은
 toolchain을 각각 사용하는 경우에는 각 service 항목으로 센다.
 
 | 묶음 | 항목 수 |
@@ -11,7 +11,7 @@ toolchain을 각각 사용하는 경우에는 각 service 항목으로 센다.
 | Visualizer runtime | 12 |
 | Camera edge bridge | 6 |
 | Package build와 검증 | 8 |
-| GitHub Actions와 image build | 10 |
+| GitHub Actions와 image build | 9 |
 
 ### Simulation server
 
@@ -79,11 +79,10 @@ Tungstenite는 default feature와 TLS feature를 끄고 handshake feature만 사
 | 의존성 | 버전 | 목적 | 공식 출처 | 라이선스 |
 | --- | --- | --- | --- | --- |
 | `actions/checkout` | 7.0.1 | Repository와 tag 이력 checkout | [GitHub](https://github.com/actions/checkout) | MIT |
-| `docker/setup-qemu-action` | 4.4.0 | ARM64 image emulation 구성 | [GitHub](https://github.com/docker/setup-qemu-action) | Apache-2.0 |
-| `tonistiigi/binfmt` | qemu-v10.2.3-68 | ARM64 QEMU static binary 등록 | [GitHub](https://github.com/tonistiigi/binfmt) | MIT |
 | `docker/setup-buildx-action` | 4.4.1 | Multi-platform image builder 구성 | [GitHub](https://github.com/docker/setup-buildx-action) | Apache-2.0 |
 | Docker Buildx | 0.37.1 | 고정 BuildKit builder와 image build 제어 | [GitHub](https://github.com/docker/buildx) | Apache-2.0 |
 | Moby BuildKit | 0.33.0 | Open Container Initiative image build | [GitHub](https://github.com/moby/buildkit) | Apache-2.0 |
+| `docker/bake-action` | 7.4.0 | Service별 병렬 Buildx Bake 실행과 cache 연결 | [GitHub](https://github.com/docker/bake-action) | Apache-2.0 |
 | `docker/login-action` | 4.6.0 | GitHub Container Registry 인증 | [GitHub](https://github.com/docker/login-action) | Apache-2.0 |
 | `docker/build-push-action` | 7.4.0 | Image, Software Bill of Materials와 provenance 게시 | [GitHub](https://github.com/docker/build-push-action) | Apache-2.0 |
 | `softprops/action-gh-release` | 3.0.3 | Image inventory를 포함한 GitHub Release 게시 | [GitHub](https://github.com/softprops/action-gh-release) | MIT |

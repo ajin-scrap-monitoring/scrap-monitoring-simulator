@@ -4,6 +4,8 @@
   "video": {
     "width": 1920,
     "height": 1080,
+    "raster_width": 640,
+    "raster_height": 360,
     "fps": 30,
     "jpeg_quality": 85,
     "max_frame_bytes": 4194304
@@ -13,10 +15,20 @@
     "max_segment_frames": 120
   },
   "camera": {
-    "position_normalized": [0.0, -0.485, 1.36],
-    "target_normalized": [0.0, 0.125, 0.75],
+    "position_normalized": [0.0, -0.354685843, 1.448540394],
+    "target_normalized": [0.0, 0.255314157, 0.498540394],
     "view_up": [0.0, 0.0, 1.0],
     "view_angle_deg": 45.0
+  },
+  "machine": {
+    "conveyor_width_m": 1.0,
+    "outlet_width_m": 0.9,
+    "conveyor_length_m": 2.0,
+    "conveyor_center_above_wall_m": 1.25,
+    "conveyor_body_height_m": 0.24,
+    "duct_height_m": 0.52,
+    "tip_fraction": 0.75,
+    "tip_drop_m": 0.08
   },
   "background_color": [0.84, 0.85, 0.84],
   "materials": {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import io
 import json
 import time
@@ -52,17 +53,29 @@ def _wait_for_live_status(base_url: str, deadline: float) -> dict[str, Any]:
     raise RuntimeError("live status did not become ready before the deadline")
 
 
-async def _check_camera(websocket_url: str, timeout_s: float) -> dict[str, Any]:
-    async with connect(
-        websocket_url,
-        open_timeout=timeout_s,
-        close_timeout=2.0,
-        max_queue=1,
-        max_size=4_194_304,
-        compression=None,
-    ) as websocket:
-        descriptor_message = await asyncio.wait_for(websocket.recv(), timeout_s)
-        frame_message = await asyncio.wait_for(websocket.recv(), timeout_s)
+async def _check_camera(
+    websocket_url: str,
+    timeout_s: float,
+    sample_frames: int = 15,
+) -> dict[str, Any]:
+    async with asyncio.timeout(timeout_s):
+        async with connect(
+            websocket_url,
+            open_timeout=timeout_s,
+            close_timeout=2.0,
+            max_queue=1,
+            max_size=4_194_304,
+            compression=None,
+        ) as websocket:
+            descriptor_message = await websocket.recv()
+            frame_messages: list[bytes] = []
+            received_at: list[float] = []
+            while len(frame_messages) < sample_frames:
+                message = await websocket.recv()
+                if not isinstance(message, bytes):
+                    raise RuntimeError("camera frame is not binary")
+                frame_messages.append(message)
+                received_at.append(time.monotonic())
     if not isinstance(descriptor_message, str):
         raise RuntimeError("camera descriptor is not a text frame")
     descriptor = json.loads(descriptor_message)
@@ -77,21 +90,51 @@ async def _check_camera(websocket_url: str, timeout_s: float) -> dict[str, Any]:
     }
     if descriptor != expected:
         raise RuntimeError(f"unexpected camera descriptor: {descriptor}")
-    if not isinstance(frame_message, bytes):
-        raise RuntimeError("camera frame is not binary")
+    frame_message = frame_messages[-1]
+    network_measurement = _measure_unique_frames(frame_messages, received_at)
     with Image.open(io.BytesIO(frame_message)) as image:
         image.load()
         if image.format != "JPEG" or image.size != (1920, 1080):
             raise RuntimeError(
                 f"unexpected camera frame: format={image.format} size={image.size}"
             )
-    return {"descriptor": descriptor, "jpeg_bytes": len(frame_message)}
+    return {
+        "descriptor": descriptor,
+        "jpeg_bytes": len(frame_message),
+        **network_measurement,
+    }
 
 
-def run(base_url: str, timeout_s: float) -> dict[str, Any]:
+def _measure_unique_frames(
+    frame_messages: list[bytes],
+    received_at: list[float],
+) -> dict[str, int | float]:
+    if not frame_messages or len(frame_messages) != len(received_at):
+        raise RuntimeError("camera frame sample is incomplete")
+    frame_digests = tuple(hashlib.sha256(frame).digest() for frame in frame_messages)
+    if len(set(frame_digests)) != len(frame_digests):
+        raise RuntimeError(
+            "camera stream repeated a JPEG during the unique frame sample"
+        )
+    network_unique_fps = (
+        (len(received_at) - 1) / (received_at[-1] - received_at[0])
+        if len(received_at) >= 2 and received_at[-1] > received_at[0]
+        else 0.0
+    )
+    return {
+        "network_unique_frames": len(frame_messages),
+        "network_unique_fps": round(network_unique_fps, 3),
+    }
+
+
+def run(
+    base_url: str,
+    timeout_s: float,
+    minimum_network_fps: float = 20.0,
+) -> dict[str, Any]:
     base_url = base_url.rstrip("/")
     deadline = time.monotonic() + timeout_s
-    status = _wait_for_live_status(base_url, deadline)
+    _wait_for_live_status(base_url, deadline)
     root_status, root_body = _get(f"{base_url}/", 3.0)
     frame_status, frame_body = _get(f"{base_url}/frame.png", 5.0)
     if root_status != 200 or b'new URL("/camera/v1/stream"' not in root_body:
@@ -107,12 +150,20 @@ def run(base_url: str, timeout_s: float) -> dict[str, Any]:
     camera = asyncio.run(
         _check_camera(f"{websocket_url}/camera/v1/stream", remaining_s)
     )
-    synthetic_camera = status["synthetic_camera"]
+    if camera["network_unique_fps"] < minimum_network_fps:
+        raise RuntimeError(
+            "camera network FPS is below the CI regression floor: "
+            f"{camera['network_unique_fps']} < {minimum_network_fps}"
+        )
+    _, current_status_body = _get(f"{base_url}/status", 3.0)
+    current_status = cast(dict[str, Any], json.loads(current_status_body))
+    synthetic_camera = current_status["synthetic_camera"]
     return {
-        "received_sequence": status["received_sequence"],
-        "rendered_sequence": status["rendered_sequence"],
+        "received_sequence": current_status["received_sequence"],
+        "rendered_sequence": current_status["rendered_sequence"],
         "camera_rendered_sequence": synthetic_camera["camera_rendered_sequence"],
         "camera_render_backend": synthetic_camera["camera_render_backend"],
+        "camera_source_fps": synthetic_camera["camera_source_fps"],
         "browser_png_bytes": len(frame_body),
         **camera,
     }
@@ -122,10 +173,18 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:18000")
     parser.add_argument("--timeout", type=float, default=120.0)
+    parser.add_argument("--minimum-network-fps", type=float, default=20.0)
     args = parser.parse_args()
     if args.timeout <= 0.0:
         parser.error("--timeout must be positive")
-    print(json.dumps(run(args.base_url, args.timeout), sort_keys=True))
+    if args.minimum_network_fps <= 0.0:
+        parser.error("--minimum-network-fps must be positive")
+    print(
+        json.dumps(
+            run(args.base_url, args.timeout, args.minimum_network_fps),
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

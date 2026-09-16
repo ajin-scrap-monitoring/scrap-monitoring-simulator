@@ -84,6 +84,21 @@ def test_latest_jpeg_store_replaces_without_history() -> None:
     assert store.revision == 3
 
 
+def test_latest_jpeg_store_does_not_publish_repeated_jpeg_bytes() -> None:
+    store = LatestJpegStore(16)
+    jpeg = b"\xff\xd8same\xff\xd9"
+
+    first = store.publish(jpeg, sequence=1, elapsed_s=1.0, render_backend="test")
+    repeated = store.publish(jpeg, sequence=2, elapsed_s=2.0, render_backend="test")
+
+    assert repeated is first
+    assert store.revision == 1
+    current = store.get()
+    assert current == first
+    assert current is not None
+    assert current.sequence == 1
+
+
 def test_latest_jpeg_store_rejects_invalid_or_oversized_frames() -> None:
     store = LatestJpegStore(5)
 
@@ -134,6 +149,7 @@ def test_pipeline_paces_interpolated_samples_and_publishes_outcome() -> None:
             reason=None,
             jpeg=b"\xff\xd8frame\xff\xd9",
             render_backend="vtkEGLRenderWindow",
+            render_seconds=0.02,
             error=None,
         )
     )
@@ -143,6 +159,78 @@ def test_pipeline_paces_interpolated_samples_and_publishes_outcome() -> None:
     assert snapshot is not None
     assert snapshot.render_backend == "vtkEGLRenderWindow"
     assert pipeline.status()["camera_frames_rendered"] == 1
+    assert pipeline.status()["camera_last_render_ms"] == 20.0
+    pipeline.close()
+
+
+def test_pipeline_submits_due_segment_end_before_next_segment() -> None:
+    header, frame = _records()
+    second = replace(
+        frame,
+        sequence=2,
+        scenario=replace(
+            frame.scenario,
+            elapsed_s=2.0,
+            surface_updated_at_s=2.0,
+        ),
+    )
+    third = replace(
+        frame,
+        sequence=3,
+        scenario=replace(
+            frame.scenario,
+            elapsed_s=3.0,
+            surface_updated_at_s=3.0,
+        ),
+    )
+    worker = FakeWorker()
+    now = [10.0]
+    pipeline = SyntheticCameraPipeline(
+        SyntheticCameraConfig.from_file(),
+        worker=worker,
+        clock=lambda: now[0],
+    )
+    pipeline.state_changed(ExecutionState(header=header, frame=frame, connected=True))
+    pipeline.state_changed(ExecutionState(header=header, frame=second, connected=True))
+
+    now[0] = 10.99
+    pipeline.state_changed(ExecutionState(header=header, frame=third, connected=True))
+
+    assert worker.submitted[-1].frame.frame.scenario.elapsed_s == 2.0
+    assert worker.submitted[-1].frame.mode == "exact"
+    pipeline.close()
+
+
+def test_pipeline_source_fps_decays_when_rendering_stalls() -> None:
+    worker = FakeWorker()
+    now = [10.0]
+    pipeline = SyntheticCameraPipeline(
+        SyntheticCameraConfig.from_file(),
+        worker=worker,
+        clock=lambda: now[0],
+    )
+    for index, published_at in enumerate((10.0, 10.1, 10.2), start=1):
+        worker.outcomes.append(
+            CameraRenderOutcome(
+                generation=0,
+                sequence=index,
+                elapsed_s=float(index),
+                mode="interpolated",
+                reason=None,
+                jpeg=b"\xff\xd8frame\xff\xd9",
+                render_backend="test",
+                render_seconds=0.02,
+                error=None,
+            )
+        )
+        now[0] = published_at
+        pipeline.poll()
+
+    assert pipeline.status()["camera_source_fps"] == 10.0
+    now[0] = 14.2
+    assert pipeline.status()["camera_source_fps"] == 0.476
+    now[0] = 15.3
+    assert pipeline.status()["camera_source_fps"] == 0.0
     pipeline.close()
 
 

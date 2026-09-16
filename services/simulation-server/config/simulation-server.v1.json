@@ -4,7 +4,7 @@
   "environment_path": "environment.v1.json",
   "quality_profile_path": "quality-profile.v1.json",
   "scenario": {
-    "mean_fill_duration_s": 86400,
+    "mean_fill_duration_s": 600,
     "fill_duration_factor_range": [0.8, 1.2],
     "fill_rate_factor_range": [0.5, 1.5],
     "fill_rate_change_duration_s_range": [300, 900],
@@ -18,8 +18,8 @@
     "inlet_comparison_radius_m": 0.5,
     "surface": {
       "cell_size_m": 0.25,
-      "update_interval_s": 0.5,
-      "pile_spread_radius_m": 1.0,
+      "update_interval_s": 0.1,
+      "pile_spread_radius_m": 0.9,
       "roughness_height_range_m": [-0.45, 0.45],
       "roughness_radius_range_m": [0.3, 0.65]
     }

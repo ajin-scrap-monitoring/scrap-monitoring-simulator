@@ -16,36 +16,16 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  ci:
-    name: CI
+  static:
+    name: Static checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Validate agent entrypoints
-        shell: bash
-        run: |
-          test -f .agents/AGENTS.md
-          test -L AGENTS.md
-          test "$(readlink AGENTS.md)" = ".agents/AGENTS.md"
-          test -L GEMINI.md
-          test "$(readlink GEMINI.md)" = ".agents/AGENTS.md"
-          test -L .claude/CLAUDE.md
-          test "$(readlink .claude/CLAUDE.md)" = "../.agents/AGENTS.md"
-
-      - name: Validate changed whitespace
-        run: git diff-tree --check --root -r HEAD
-
-      - name: Set up ARM64 emulation
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-        with:
-          image: docker.io/tonistiigi/binfmt:qemu-v10.2.3-68@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
-          platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -54,8 +34,92 @@ jobs:
           driver-opts: |
             image=docker.io/moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3
 
-      - name: Build and test all container images
+      - name: Validate repository and documentation
+        run: scripts/check.sh static
+
+  amd64:
+    name: AMD64 services
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.37.1
+          driver-opts: |
+            image=docker.io/moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3
+
+      - name: Build and test AMD64 services
+        uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7.4.0
         env:
           BUILD_REVISION: ${{ github.sha }}
           BUILD_VERSION: ci-${{ github.sha }}
-        run: scripts/check.sh
+        with:
+          targets: ci-amd64
+          set: |
+            simulation-server.cache-from=type=gha,scope=simulation-server-linux-amd64
+            simulation-server.cache-to=type=gha,scope=simulation-server-linux-amd64,mode=max,ignore-error=true
+            visualizer.cache-from=type=gha,scope=visualizer-linux-amd64
+            visualizer.cache-to=type=gha,scope=visualizer-linux-amd64,mode=max,ignore-error=true
+
+      - name: Probe exact AMD64 runtime images
+        run: scripts/check.sh amd64-runtime
+
+  arm64:
+    name: ARM64 camera bridge
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.37.1
+          driver-opts: |
+            image=docker.io/moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3
+
+      - name: Build and test ARM64 camera bridge
+        uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7.4.0
+        env:
+          BUILD_REVISION: ${{ github.sha }}
+          BUILD_VERSION: ci-${{ github.sha }}
+        with:
+          targets: camera-edge-bridge
+          set: |
+            camera-edge-bridge.cache-from=type=gha,scope=camera-edge-bridge-linux-arm64
+            camera-edge-bridge.cache-to=type=gha,scope=camera-edge-bridge-linux-arm64,mode=max,ignore-error=true
+
+      - name: Probe exact ARM64 runtime image
+        run: scripts/check.sh arm64-runtime
+
+  ci:
+    name: CI
+    if: ${{ always() }}
+    needs:
+      - static
+      - amd64
+      - arm64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Require every CI partition
+        env:
+          AMD64_RESULT: ${{ needs.amd64.result }}
+          ARM64_RESULT: ${{ needs.arm64.result }}
+          STATIC_RESULT: ${{ needs.static.result }}
+        run: |
+          test "$STATIC_RESULT" = success
+          test "$AMD64_RESULT" = success
+          test "$ARM64_RESULT" = success

@@ -2,6 +2,7 @@
 
 pub mod cli;
 pub mod configuration;
+mod decimal_ratio;
 pub mod error;
 pub mod geometry;
 pub mod measurement;

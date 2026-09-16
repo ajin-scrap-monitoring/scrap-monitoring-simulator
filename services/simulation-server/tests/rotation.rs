@@ -1,3 +1,5 @@
+#[path = "../src/decimal_ratio.rs"]
+mod decimal_ratio;
 #[path = "../src/measurement/rotation.rs"]
 mod rotation;
 #[path = "../src/measurement/sdk.rs"]

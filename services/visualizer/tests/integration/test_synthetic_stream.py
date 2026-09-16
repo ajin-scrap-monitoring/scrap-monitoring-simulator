@@ -99,12 +99,13 @@ def test_camera_routes_do_not_install_a_standalone_page() -> None:
     assert all(getattr(route, "path", None) != "/camera/" for route in app.routes)
 
 
-def test_camera_websocket_repeats_latest_jpeg_at_device_cadence() -> None:
+def test_camera_websocket_sends_each_store_revision_once() -> None:
     async def exercise() -> None:
         store = LatestJpegStore()
-        jpeg = b"\xff\xd8latest\xff\xd9"
+        first = b"\xff\xd8first\xff\xd9"
+        second = b"\xff\xd8second\xff\xd9"
         store.publish(
-            jpeg,
+            first,
             sequence=7,
             elapsed_s=3.0,
             render_backend="test",
@@ -122,11 +123,22 @@ def test_camera_websocket_repeats_latest_jpeg_at_device_cadence() -> None:
             if isinstance(route, APIWebSocketRoute)
             and route.path == "/camera/v1/stream"
         )
-        websocket = FakeWebSocket(disconnect_after=3)
+        websocket = FakeWebSocket(disconnect_after=2)
+        task = asyncio.create_task(route.endpoint(cast(Any, websocket)))
+        while not websocket.binary_messages:
+            await asyncio.sleep(0.001)
+        await asyncio.sleep(0.05)
+        assert websocket.binary_messages == [first]
 
-        await route.endpoint(cast(Any, websocket))
+        store.publish(
+            second,
+            sequence=8,
+            elapsed_s=4.0,
+            render_backend="test",
+        )
+        await task
 
-        assert websocket.binary_messages == [jpeg, jpeg, jpeg]
+        assert websocket.binary_messages == [first, second]
 
     asyncio.run(exercise())
 

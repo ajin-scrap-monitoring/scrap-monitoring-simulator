@@ -30,7 +30,12 @@ def test_vtk_backend_renders_perspective_mjpeg_source_frame() -> None:
     config = SyntheticCameraConfig.from_file()
     config = replace(
         config,
-        video=replace(config.video, width=320, height=180, jpeg_quality=70),
+        video=replace(
+            config.video,
+            raster_width=160,
+            raster_height=90,
+            jpeg_quality=70,
+        ),
         effects=replace(
             config.effects,
             noise_standard_deviation=0.0,
@@ -56,6 +61,11 @@ def test_vtk_backend_renders_perspective_mjpeg_source_frame() -> None:
             ),
             config,
         )
+        plotter = renderer._plotter
+        assert plotter is not None
+        actors = tuple(plotter.actors.values())
+        assert actors
+        assert all(not actor.HasTranslucentPolygonalGeometry() for actor in actors)
     finally:
         renderer.close()
 
@@ -65,4 +75,4 @@ def test_vtk_backend_renders_perspective_mjpeg_source_frame() -> None:
     assert updated.jpeg != frame.jpeg
     with Image.open(BytesIO(frame.jpeg)) as image:
         assert image.format == "JPEG"
-        assert image.size == (320, 180)
+        assert image.size == (1920, 1080)

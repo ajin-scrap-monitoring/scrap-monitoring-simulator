@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.20@sha256:26147acbda4f14c5add9946e2fd2ed543fc402884fd75146bd342a7f6271dc1d
+
 ARG PYTHON_IMAGE=python@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
 ARG UV_IMAGE=ghcr.io/astral-sh/uv@sha256:b485bd65cc2cf1c9a93b3554012c9c3778cf7b1b5fd3d3096ce9e1226c97e1e6
 
@@ -27,44 +29,68 @@ ENV HOME=/tmp \
 
 WORKDIR /workspace/visualizer
 
-FROM system AS builder
+FROM system AS runtime-dependencies
 
 COPY services/visualizer/pyproject.toml services/visualizer/uv.lock ./
+
+RUN --mount=type=cache,id=scrap-visualizer-uv,target=/tmp/cache/uv,sharing=locked \
+    uv sync --frozen --no-dev --no-install-project
+
+FROM runtime-dependencies AS dev-dependencies
+
+RUN --mount=type=cache,id=scrap-visualizer-uv,target=/tmp/cache/uv,sharing=locked \
+    uv sync --frozen --no-install-project
+
+FROM runtime-dependencies AS builder
+
 COPY services/visualizer/src/ src/
 COPY contracts/ /workspace/contracts/
 
-RUN cmp ../contracts/scene/v1/definition.schema.json \
+RUN --mount=type=cache,id=scrap-visualizer-uv,target=/tmp/cache/uv,sharing=locked \
+    cmp ../contracts/scene/v1/definition.schema.json \
         src/scrap_monitoring_visualizer/contracts/schema/v1/definition.schema.json \
     && cmp ../contracts/scene/v1/frame.schema.json \
         src/scrap_monitoring_visualizer/contracts/schema/v1/frame.schema.json \
     && uv sync --frozen --no-dev --no-editable
 
-FROM builder AS test
+FROM dev-dependencies AS test
 
+COPY services/visualizer/src/ src/
+COPY contracts/ /workspace/contracts/
 COPY services/visualizer/tests/ tests/
 COPY services/simulation-server/config/ /workspace/config/
 
-RUN uv sync --frozen \
+RUN --mount=type=cache,id=scrap-visualizer-uv,target=/tmp/cache/uv,sharing=locked \
+    cmp ../contracts/scene/v1/definition.schema.json \
+        src/scrap_monitoring_visualizer/contracts/schema/v1/definition.schema.json \
+    && cmp ../contracts/scene/v1/frame.schema.json \
+        src/scrap_monitoring_visualizer/contracts/schema/v1/frame.schema.json \
+    && uv sync --frozen --no-editable \
     && uv run ruff format --check src tests \
     && uv run ruff check src tests \
     && uv run mypy \
     && uv run pytest -q \
-    && uv build --wheel --sdist
+    && uv build --wheel --sdist \
+    && touch /tmp/visualizer-tests-passed
+
+FROM builder AS runtime-builder
+
+COPY --from=test /tmp/visualizer-tests-passed /tmp/visualizer-tests-passed
 
 FROM system AS runtime
 
 RUN groupadd --gid 10001 visualizer \
     && useradd --uid 10001 --gid visualizer --no-create-home --home-dir /tmp visualizer
 
-COPY --from=builder --chown=visualizer:visualizer \
+COPY --from=runtime-builder --chown=visualizer:visualizer \
     /workspace/visualizer/.venv /workspace/visualizer/.venv
-COPY --from=builder --chown=visualizer:visualizer \
+COPY --from=runtime-builder --chown=visualizer:visualizer \
     /workspace/contracts /workspace/contracts
 COPY --chown=visualizer:visualizer services/visualizer/THIRD_PARTY_NOTICES.md \
     /workspace/visualizer/THIRD_PARTY_NOTICES.md
 
 ARG BUILD_REVISION=unknown
-ARG BUILD_VERSION=0.1.0
+ARG BUILD_VERSION=0.2.0
 
 LABEL org.opencontainers.image.description="Canonical scene browser and synthetic camera renderer" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \

@@ -237,10 +237,30 @@ def test_preview_http_endpoints_return_latest_frame() -> None:
             assert b"/frame.png?revision=" in body
             assert b'href="/camera/"' not in body
             assert b'new URL("/camera/v1/stream"' in body
-            assert body.count(b"<img ") == 2
+            assert body.count(b"<img ") == 1
+            assert (
+                b'<canvas class="visual" id="camera" width="960" height="540"' in body
+            )
+            assert b'camera.getContext("bitmaprenderer")' in body
+            assert b"createImageBitmap(blob,{" in body
+            assert b"resizeWidth:cameraPreviewWidth" in body
+            assert b"resizeHeight:cameraPreviewHeight" in body
+            assert b"requestAnimationFrame(presentLatestCameraFrame)" in body
+            assert b"window.__scrapCameraMetrics" in body
+            assert b"if(cameraDecoding||cameraReadyBitmap!==null)return" in body
+            assert b"while(cameraPendingBlob!==null)" not in body
+            decoded = body.index(b'recordCameraMetric("decoded")')
+            ready = body.index(b"cameraReadyBitmap=bitmap", decoded)
+            assert b"cameraPendingBlob!==null" not in body[decoded:ready]
+            assert b"bitmap.close()" not in body[decoded:ready]
+            presented = body.index(b'recordCameraMetric("presented")')
+            next_decode = body.index(b"displayLatestCameraFrame()", presented)
+            assert next_decode > presented
             assert b'class="views"' in body
             assert b'class="metrics"' in body
             assert b"displaySceneValues(status.scene)" in body
+            assert b'" m<sup>3</sup>"' in body
+            assert b"sup{font-size:.5em;line-height:0}" in body
             assert b"Runtime status" not in body
             assert b"status.frame_revision!==displayedRevision" in body
         finally:

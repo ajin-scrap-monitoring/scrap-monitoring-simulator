@@ -51,7 +51,11 @@ def run_probe(
     config = SyntheticCameraConfig.from_file()
     config = replace(
         config,
-        video=replace(config.video, width=640, height=360),
+        video=replace(
+            config.video,
+            raster_width=320,
+            raster_height=180,
+        ),
     )
     renderer = VtkPbrRenderer()
     try:
@@ -60,7 +64,7 @@ def run_probe(
         renderer.close()
     with Image.open(BytesIO(rendered.jpeg)) as image:
         image.load()
-        if image.format != "JPEG" or image.size != (640, 360):
+        if image.format != "JPEG" or image.size != (1920, 1080):
             raise RuntimeError("synthetic camera produced an unexpected JPEG")
     frame_path = output_dir / "camera.jpg"
     frame_path.write_bytes(rendered.jpeg)

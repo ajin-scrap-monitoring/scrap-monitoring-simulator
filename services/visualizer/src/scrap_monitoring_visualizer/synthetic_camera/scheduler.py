@@ -96,6 +96,8 @@ def materialize_target(
             right_sequence=right.sequence,
             alpha=1.0,
             mode="hold",
+            left_inlet_index=right.scenario.current_inlet_index,
+            right_inlet_index=right.scenario.current_inlet_index,
             reason=target.reason,
         )
     return interpolate_frames(
