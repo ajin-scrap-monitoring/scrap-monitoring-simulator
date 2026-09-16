@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterator
+from dataclasses import replace
 
 from scrap_monitoring_visualizer.contracts.models import SceneFrame
 
@@ -49,36 +50,34 @@ def schedule_segment(
             ),
         )
 
-    regular_count = math.floor(duration_s * fps + 1e-9)
-    candidate_times = [
-        left.scenario.elapsed_s + index / fps
-        for index in range(1, regular_count + 1)
-        if left.scenario.elapsed_s + index / fps < right.scenario.elapsed_s - 1e-12
-    ]
-    candidate_times.append(right.scenario.elapsed_s)
-    if len(candidate_times) > timing.max_segment_frames:
+    left_target_id = math.floor(left.scenario.elapsed_s * fps + 1e-9)
+    right_target_id = math.floor(right.scenario.elapsed_s * fps + 1e-9)
+    target_ids = tuple(range(left_target_id + 1, right_target_id + 1))
+    if len(target_ids) > timing.max_segment_frames:
         return (
             FrameTarget(
                 elapsed_s=right.scenario.elapsed_s,
                 mode="hold",
                 reason="frame_limit",
+                target_id=right_target_id,
             ),
         )
     return tuple(
         FrameTarget(
-            elapsed_s=elapsed_s,
+            elapsed_s=target_id / fps,
             mode=(
                 "exact"
                 if math.isclose(
-                    elapsed_s,
+                    target_id / fps,
                     right.scenario.elapsed_s,
                     rel_tol=0.0,
                     abs_tol=1e-12,
                 )
                 else "interpolated"
             ),
+            target_id=target_id,
         )
-        for elapsed_s in candidate_times
+        for target_id in target_ids
     )
 
 
@@ -99,12 +98,16 @@ def materialize_target(
             left_inlet_index=right.scenario.current_inlet_index,
             right_inlet_index=right.scenario.current_inlet_index,
             reason=target.reason,
+            target_id=target.target_id,
         )
-    return interpolate_frames(
-        left,
-        right,
-        target.elapsed_s,
-        max_gap_s=timing.max_interpolation_gap_s,
+    return replace(
+        interpolate_frames(
+            left,
+            right,
+            target.elapsed_s,
+            max_gap_s=timing.max_interpolation_gap_s,
+        ),
+        target_id=target.target_id,
     )
 
 

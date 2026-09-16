@@ -7,6 +7,8 @@ from scrap_monitoring_visualizer.contracts import (
     ContractParser,
     SceneDefinition,
     SceneFrame,
+    SceneSegment,
+    materialize_keyframe,
 )
 from scrap_monitoring_visualizer.synthetic_camera import SyntheticCameraConfig
 from scrap_monitoring_visualizer.synthetic_camera.models import (
@@ -18,7 +20,7 @@ from scrap_monitoring_visualizer.synthetic_camera.worker import (
     _render,
 )
 
-CONTRACT_ROOT = Path("../contracts/scene/v1")
+CONTRACT_ROOT = Path("../contracts/scene/v2")
 
 
 class RecordingRenderer:
@@ -48,14 +50,17 @@ class RecordingRenderer:
 def test_worker_passes_inlet_interpolation_to_renderer() -> None:
     parser = ContractParser(CONTRACT_ROOT)
     lines = (
-        (CONTRACT_ROOT / "fixtures/scene.v1.jsonl")
+        (CONTRACT_ROOT / "fixtures/scene.v2.jsonl")
         .read_bytes()
         .splitlines(keepends=True)
     )
     header = parser.parse_line(lines[0]).value
-    frame = parser.parse_line(lines[1]).value
+    segment = parser.parse_line(lines[1]).value
     assert isinstance(header, SceneDefinition)
-    assert isinstance(frame, SceneFrame)
+    assert isinstance(segment, SceneSegment)
+    frame = materialize_keyframe(
+        header, segment.right, segment.right_sequence, segment.run_id
+    )
     interpolation = InterpolatedFrame(
         frame=frame,
         left_sequence=frame.sequence,
@@ -87,14 +92,17 @@ def test_worker_reports_renderer_failure() -> None:
 
     parser = ContractParser(CONTRACT_ROOT)
     lines = (
-        (CONTRACT_ROOT / "fixtures/scene.v1.jsonl")
+        (CONTRACT_ROOT / "fixtures/scene.v2.jsonl")
         .read_bytes()
         .splitlines(keepends=True)
     )
     header = parser.parse_line(lines[0]).value
-    frame = parser.parse_line(lines[1]).value
+    segment = parser.parse_line(lines[1]).value
     assert isinstance(header, SceneDefinition)
-    assert isinstance(frame, SceneFrame)
+    assert isinstance(segment, SceneSegment)
+    frame = materialize_keyframe(
+        header, segment.right, segment.right_sequence, segment.run_id
+    )
     interpolation = InterpolatedFrame(
         frame=frame,
         left_sequence=frame.sequence,

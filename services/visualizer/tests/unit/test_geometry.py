@@ -9,6 +9,8 @@ from scrap_monitoring_visualizer.contracts import (
     ContractParser,
     SceneDefinition,
     SceneFrame,
+    SceneSegment,
+    materialize_keyframe,
 )
 from scrap_monitoring_visualizer.geometry import (
     build_scene_geometry,
@@ -16,21 +18,23 @@ from scrap_monitoring_visualizer.geometry import (
     surface_height_at,
 )
 
-CONTRACT_ROOT = Path("../contracts/scene/v1")
+CONTRACT_ROOT = Path("../contracts/scene/v2")
 
 
 @pytest.fixture(scope="module")
 def records() -> tuple[SceneDefinition, SceneFrame]:
     parser = ContractParser(CONTRACT_ROOT)
     lines = (
-        (CONTRACT_ROOT / "fixtures/scene.v1.jsonl")
+        (CONTRACT_ROOT / "fixtures/scene.v2.jsonl")
         .read_bytes()
         .splitlines(keepends=True)
     )
     values = tuple(parser.parse_line(line).value for line in lines)
     assert isinstance(values[0], SceneDefinition)
-    assert isinstance(values[1], SceneFrame)
-    return values[0], values[1]
+    assert isinstance(values[1], SceneSegment)
+    return values[0], materialize_keyframe(
+        values[0], values[1].right, values[1].right_sequence, values[1].run_id
+    )
 
 
 def _projected_area(

@@ -1,4 +1,4 @@
-//! Best-effort version 1 load-model scene streaming over TCP.
+//! Best-effort version 2 canonical scene segment streaming over TCP.
 
 use std::{
     collections::BTreeSet,
@@ -20,20 +20,16 @@ use tokio::{
 
 use crate::{
     configuration::SimulatorInputs,
-    output_format::{ScenarioDocument, SceneSurfaceDocument, validate_model_snapshot},
+    output_format::{HeightRows, ScenarioDocument, validate_model_snapshot},
     randomness::{ModelRng, RandomError, RandomSource, StreamScope},
     scenario::ScenarioModelSnapshot,
 };
 
-pub const SCENE_VERSION: u32 = 1;
+pub const SCENE_VERSION: u32 = 2;
 pub const MAX_SCENE_LINE_BYTES: usize = 1_048_576;
 pub const MAX_SCENE_SEQUENCE: u64 = 9_007_199_254_740_991;
 pub const DEFAULT_SCENE_HOST: &str = "127.0.0.1";
 pub const DEFAULT_SCENE_PORT: u16 = 17_000;
-pub const DEFAULT_SCENE_INTERVAL_S: f64 = 1.0;
-pub const MAX_SCENE_INTERVAL_S: f64 = 86_400.0;
-
-const TIME_TOLERANCE_S: f64 = 1e-12;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SceneStreamError {
@@ -101,6 +97,26 @@ pub struct StaticScene {
     top_z_m: f64,
     inlet_positions_xy_m: Vec<[f64; 2]>,
     sensors: Vec<SceneSensor>,
+    surface_grid: SceneGrid,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SceneGrid {
+    cell_size_m: f64,
+    x_coordinates_m: Vec<f64>,
+    y_coordinates_m: Vec<f64>,
+}
+
+impl SceneGrid {
+    pub fn from_surface(surface: &crate::scenario::SurfaceSnapshot) -> Result<Self> {
+        let grid = Self {
+            cell_size_m: surface.cell_size_m(),
+            x_coordinates_m: surface.x_coordinates_m().to_vec(),
+            y_coordinates_m: surface.y_coordinates_m().to_vec(),
+        };
+        validate_grid(&grid)?;
+        Ok(grid)
+    }
 }
 
 impl StaticScene {
@@ -110,6 +126,7 @@ impl StaticScene {
         top_z_m: f64,
         inlet_positions_xy_m: Vec<[f64; 2]>,
         sensors: Vec<SceneSensor>,
+        surface_grid: SceneGrid,
     ) -> Result<Self> {
         if boundary_xy_m.len() < 3
             || boundary_xy_m
@@ -150,16 +167,21 @@ impl StaticScene {
                 "scene sensor identifiers must be unique",
             ));
         }
+        validate_grid(&surface_grid)?;
         Ok(Self {
             boundary_xy_m,
             floor_z_m,
             top_z_m,
             inlet_positions_xy_m,
             sensors,
+            surface_grid,
         })
     }
 
-    pub fn from_inputs(inputs: &SimulatorInputs) -> Result<Self> {
+    pub fn from_inputs(
+        inputs: &SimulatorInputs,
+        surface: &crate::scenario::SurfaceSnapshot,
+    ) -> Result<Self> {
         let sensors = inputs
             .environment
             .sensors
@@ -174,6 +196,7 @@ impl StaticScene {
             inputs.environment.top_z_m,
             inputs.simulator.scenario.inlet_positions_xy_m.clone(),
             sensors,
+            SceneGrid::from_surface(surface)?,
         )
     }
 }
@@ -218,17 +241,19 @@ impl SceneStreamHeader {
 }
 
 #[derive(Clone, Debug)]
-pub struct SceneFrame {
+pub struct SceneSegment {
     sequence: u64,
     run_id: String,
-    snapshot: ScenarioModelSnapshot,
+    left: ScenarioModelSnapshot,
+    right: ScenarioModelSnapshot,
 }
 
-impl SceneFrame {
+impl SceneSegment {
     pub fn new(
         sequence: u64,
         run_id: impl Into<String>,
-        snapshot: ScenarioModelSnapshot,
+        left: ScenarioModelSnapshot,
+        right: ScenarioModelSnapshot,
     ) -> Result<Self> {
         if !(1..=MAX_SCENE_SEQUENCE).contains(&sequence) {
             return Err(SceneStreamError::Invalid(
@@ -239,10 +264,12 @@ impl SceneFrame {
         if run_id.is_empty() {
             return Err(SceneStreamError::Invalid("scene run_id must be non-empty"));
         }
+        validate_scene_segment(&left, &right)?;
         Ok(Self {
             sequence,
             run_id,
-            snapshot,
+            left,
+            right,
         })
     }
 }
@@ -269,6 +296,14 @@ struct SceneDocument<'a> {
     top_z_m: f64,
     inlet_positions_xy_m: &'a [[f64; 2]],
     sensors: Vec<SensorDocument<'a>>,
+    surface: GridDocument<'a>,
+}
+
+#[derive(Serialize)]
+struct GridDocument<'a> {
+    cell_size_m: f64,
+    x_coordinates_m: &'a [f64],
+    y_coordinates_m: &'a [f64],
 }
 
 #[derive(Serialize)]
@@ -285,9 +320,17 @@ struct RecordDocument<'a> {
     #[serde(rename = "type")]
     record_type: &'static str,
     sequence: u64,
+    left_sequence: u64,
+    right_sequence: u64,
     run_id: &'a str,
+    left: KeyframeDocument<'a>,
+    right: KeyframeDocument<'a>,
+}
+
+#[derive(Serialize)]
+struct KeyframeDocument<'a> {
     scenario: ScenarioDocument,
-    surface: SceneSurfaceDocument<'a>,
+    heights_m: HeightRows<'a>,
 }
 
 pub fn encode_scene_header_frame(header: &SceneStreamHeader) -> Result<Vec<u8>> {
@@ -317,22 +360,78 @@ pub fn encode_scene_header_frame(header: &SceneStreamHeader) -> Result<Vec<u8>> 
                     u90: sensor.u90,
                 })
                 .collect(),
+            surface: GridDocument {
+                cell_size_m: scene.surface_grid.cell_size_m,
+                x_coordinates_m: &scene.surface_grid.x_coordinates_m,
+                y_coordinates_m: &scene.surface_grid.y_coordinates_m,
+            },
         },
     };
     encode_frame(&document)
 }
 
-pub fn encode_scene_frame(record: &SceneFrame) -> Result<Vec<u8>> {
-    validate_model_snapshot(&record.snapshot).map_err(SceneStreamError::Invalid)?;
+pub fn encode_scene_segment(record: &SceneSegment) -> Result<Vec<u8>> {
+    validate_scene_segment(&record.left, &record.right)?;
     let document = RecordDocument {
         scene_version: SCENE_VERSION,
-        record_type: "scene_frame",
+        record_type: "scene_segment",
         sequence: record.sequence,
+        left_sequence: record.sequence.saturating_sub(1),
+        right_sequence: record.sequence,
         run_id: &record.run_id,
-        scenario: ScenarioDocument::from(&record.snapshot.state),
-        surface: SceneSurfaceDocument::from(&record.snapshot.surface),
+        left: KeyframeDocument {
+            scenario: ScenarioDocument::from(&record.left.state),
+            heights_m: HeightRows::new(&record.left.surface),
+        },
+        right: KeyframeDocument {
+            scenario: ScenarioDocument::from(&record.right.state),
+            heights_m: HeightRows::new(&record.right.surface),
+        },
     };
     encode_frame(&document)
+}
+
+fn validate_grid(grid: &SceneGrid) -> Result<()> {
+    if !grid.cell_size_m.is_finite() || grid.cell_size_m <= 0.0 {
+        return Err(SceneStreamError::Invalid(
+            "scene surface grid cell size must be finite and positive",
+        ));
+    }
+    if !strictly_increasing_finite(&grid.x_coordinates_m)
+        || !strictly_increasing_finite(&grid.y_coordinates_m)
+    {
+        return Err(SceneStreamError::Invalid(
+            "scene surface grid coordinates must be finite and strictly increasing",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_scene_segment(
+    left: &ScenarioModelSnapshot,
+    right: &ScenarioModelSnapshot,
+) -> Result<()> {
+    validate_model_snapshot(left).map_err(SceneStreamError::Invalid)?;
+    validate_model_snapshot(right).map_err(SceneStreamError::Invalid)?;
+    if left.state.elapsed_s >= right.state.elapsed_s {
+        return Err(SceneStreamError::Invalid(
+            "scene segment keyframes must be strictly ordered by elapsed time",
+        ));
+    }
+    let left_grid = SceneGrid::from_surface(&left.surface)?;
+    let right_grid = SceneGrid::from_surface(&right.surface)?;
+    if left_grid != right_grid {
+        return Err(SceneStreamError::Invalid(
+            "scene segment keyframes must share one static surface grid",
+        ));
+    }
+    Ok(())
+}
+
+fn strictly_increasing_finite(values: &[f64]) -> bool {
+    values.len() >= 2
+        && values.iter().all(|value| value.is_finite())
+        && values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
 fn encode_frame(document: &impl Serialize) -> Result<Vec<u8>> {
@@ -352,7 +451,6 @@ fn encode_frame(document: &impl Serialize) -> Result<Vec<u8>> {
 pub struct ScenePublisherConfig {
     host: String,
     port: u16,
-    interval_s: f64,
     connect_timeout: Duration,
     send_timeout: Duration,
     reconnect_initial_delay_s: f64,
@@ -364,7 +462,6 @@ impl ScenePublisherConfig {
     pub fn new(
         host: impl Into<String>,
         port: u16,
-        interval_s: f64,
         connect_timeout_s: f64,
         send_timeout_s: f64,
         reconnect_initial_delay_s: f64,
@@ -377,11 +474,6 @@ impl ScenePublisherConfig {
         if port == 0 {
             return Err(SceneStreamError::Invalid(
                 "scene port must be from 1 through 65535",
-            ));
-        }
-        if !interval_s.is_finite() || interval_s <= 0.0 || interval_s > MAX_SCENE_INTERVAL_S {
-            return Err(SceneStreamError::Invalid(
-                "scene interval must be finite and between 0 and 86400 seconds",
             ));
         }
         let connect_timeout = positive_duration(connect_timeout_s, "connect timeout")?;
@@ -404,7 +496,6 @@ impl ScenePublisherConfig {
         Ok(Self {
             host,
             port,
-            interval_s,
             connect_timeout,
             send_timeout,
             reconnect_initial_delay_s,
@@ -442,10 +533,9 @@ impl PublisherCounters {
 
 struct PublisherState {
     closed: bool,
-    latest: Option<SceneFrame>,
+    latest: Option<SceneSegment>,
     next_sequence: u64,
-    last_elapsed_s: Option<f64>,
-    next_sample_s: f64,
+    previous_keyframe: ScenarioModelSnapshot,
 }
 
 struct SharedPublisher {
@@ -464,8 +554,18 @@ pub struct TcpScenePublisher {
 }
 
 impl TcpScenePublisher {
-    pub fn new(config: ScenePublisherConfig, header: SceneStreamHeader) -> Result<Self> {
+    pub fn new(
+        config: ScenePublisherConfig,
+        header: SceneStreamHeader,
+        initial_keyframe: ScenarioModelSnapshot,
+    ) -> Result<Self> {
         let header_frame = encode_scene_header_frame(&header)?;
+        validate_model_snapshot(&initial_keyframe).map_err(SceneStreamError::Invalid)?;
+        if initial_keyframe.state.elapsed_s.to_bits() != 0.0_f64.to_bits() {
+            return Err(SceneStreamError::Invalid(
+                "initial canonical keyframe must be at elapsed time zero",
+            ));
+        }
         Ok(Self {
             config,
             run_id: header.run_id,
@@ -476,8 +576,7 @@ impl TcpScenePublisher {
                     closed: false,
                     latest: None,
                     next_sequence: 1,
-                    last_elapsed_s: None,
-                    next_sample_s: 0.0,
+                    previous_keyframe: initial_keyframe,
                 }),
                 counters: PublisherCounters::default(),
                 wakeup: Notify::new(),
@@ -494,28 +593,7 @@ impl TcpScenePublisher {
         self.shared.counters.snapshot()
     }
 
-    pub fn is_due(&self, elapsed_s: f64) -> bool {
-        let mut state = lock(&self.shared.state);
-        if state.closed || !elapsed_s.is_finite() {
-            return false;
-        }
-        if state
-            .last_elapsed_s
-            .is_some_and(|last| elapsed_s + TIME_TOLERANCE_S < last)
-        {
-            return false;
-        }
-        state.last_elapsed_s = Some(elapsed_s);
-        if elapsed_s + TIME_TOLERANCE_S < state.next_sample_s {
-            return false;
-        }
-        state.next_sample_s = (elapsed_s / self.config.interval_s + TIME_TOLERANCE_S).floor()
-            * self.config.interval_s
-            + self.config.interval_s;
-        true
-    }
-
-    pub fn publish(&self, snapshot: ScenarioModelSnapshot) -> Result<bool> {
+    pub fn publish(&self, keyframe: ScenarioModelSnapshot) -> Result<bool> {
         let mut state = lock(&self.shared.state);
         if state.closed {
             return Ok(false);
@@ -525,7 +603,13 @@ impl TcpScenePublisher {
         }
         let sequence = state.next_sequence;
         state.next_sequence += 1;
-        let record = SceneFrame::new(sequence, self.run_id.clone(), snapshot)?;
+        let record = SceneSegment::new(
+            sequence,
+            self.run_id.clone(),
+            state.previous_keyframe.clone(),
+            keyframe.clone(),
+        )?;
+        state.previous_keyframe = keyframe;
         if state.latest.replace(record).is_some() {
             increment(&self.shared.counters.dropped_records);
         }
@@ -619,7 +703,7 @@ async fn use_next_connection(
         let Some(record) = take_latest(shared) else {
             continue;
         };
-        let frame = match encode_scene_frame(&record) {
+        let frame = match encode_scene_segment(&record) {
             Ok(frame) => frame,
             Err(_) => {
                 increment(&shared.counters.dropped_records);
@@ -661,7 +745,7 @@ async fn wait_for_pending(shared: &SharedPublisher) -> bool {
     }
 }
 
-fn take_latest(shared: &SharedPublisher) -> Option<SceneFrame> {
+fn take_latest(shared: &SharedPublisher) -> Option<SceneSegment> {
     lock(&shared.state).latest.take()
 }
 
@@ -774,12 +858,14 @@ mod tests {
 
     use super::*;
 
-    fn publisher() -> TcpScenePublisher {
+    fn publisher() -> (TcpScenePublisher, crate::scenario::ScenarioSimulator) {
         let inputs = load_simulator_inputs(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("config/simulation-server.v1.json"),
         )
         .unwrap();
-        let scene = StaticScene::from_inputs(&inputs).unwrap();
+        let simulator = build_scenario_simulator(&inputs).unwrap();
+        let initial = simulator.scene_snapshot().unwrap();
+        let scene = StaticScene::from_inputs(&inputs, &initial.surface).unwrap();
         let header = SceneStreamHeader::new(
             inputs.environment.environment_id.clone(),
             "run-a",
@@ -788,20 +874,18 @@ mod tests {
             scene,
         )
         .unwrap();
-        let config =
-            ScenePublisherConfig::new("127.0.0.1", 17_000, 1.0, 1.0, 1.0, 0.5, 5.0).unwrap();
-        TcpScenePublisher::new(config, header).unwrap()
+        let config = ScenePublisherConfig::new("127.0.0.1", 17_000, 1.0, 1.0, 0.5, 5.0).unwrap();
+        (
+            TcpScenePublisher::new(config, header, initial).unwrap(),
+            simulator,
+        )
     }
 
     #[test]
     fn sequence_stops_at_the_json_safe_integer_limit() {
-        let publisher = publisher();
+        let (publisher, mut simulator) = publisher();
         lock(&publisher.shared.state).next_sequence = MAX_SCENE_SEQUENCE;
-        let inputs = load_simulator_inputs(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("config/simulation-server.v1.json"),
-        )
-        .unwrap();
-        let simulator = build_scenario_simulator(&inputs).unwrap();
+        simulator.advance_to(0.1).unwrap();
         assert!(
             publisher
                 .publish(simulator.scene_snapshot().unwrap())
@@ -840,5 +924,45 @@ mod tests {
 
         assert_eq!(counters.snapshot().sent_records, 1);
         assert_eq!(counters.snapshot().dropped_records, 2);
+    }
+
+    #[test]
+    fn segment_is_self_contained_and_preserves_the_static_grid_in_the_definition() {
+        let (publisher, mut simulator) = publisher();
+        let header: serde_json::Value = serde_json::from_slice(&publisher.header_frame).unwrap();
+        assert_eq!(header["scene_version"], 2);
+        assert_eq!(header["type"], "scene_definition");
+        assert!(
+            header["scene"]["surface"]["x_coordinates_m"]
+                .as_array()
+                .is_some_and(|coordinates| coordinates.len() >= 2)
+        );
+
+        simulator.advance_to(0.1).unwrap();
+        publisher
+            .publish(simulator.scene_snapshot().unwrap())
+            .unwrap();
+        let segment = lock(&publisher.shared.state).latest.clone().unwrap();
+        let record: serde_json::Value =
+            serde_json::from_slice(&encode_scene_segment(&segment).unwrap()).unwrap();
+        assert_eq!(record["scene_version"], 2);
+        assert_eq!(record["type"], "scene_segment");
+        assert_eq!(record["left_sequence"], 0);
+        assert_eq!(record["right_sequence"], 1);
+        assert_eq!(record["left"]["scenario"]["elapsed_s"], 0.0);
+        assert_eq!(record["right"]["scenario"]["elapsed_s"], 0.1);
+        assert!(record["left"].get("surface").is_none());
+        assert!(record["right"]["heights_m"].as_array().is_some());
+    }
+
+    #[test]
+    fn publisher_rejects_non_monotonic_canonical_keyframes() {
+        let (publisher, simulator) = publisher();
+        assert!(matches!(
+            publisher.publish(simulator.scene_snapshot().unwrap()),
+            Err(SceneStreamError::Invalid(
+                "scene segment keyframes must be strictly ordered by elapsed time"
+            ))
+        ));
     }
 }

@@ -9,10 +9,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
-from scrap_monitoring_visualizer.contracts.models import SceneDefinition, SceneFrame
+from scrap_monitoring_visualizer.contracts.models import (
+    SceneDefinition,
+    SceneFrame,
+    materialize_keyframe,
+)
 from scrap_monitoring_visualizer.state import ExecutionState
 
-from .interpolation import exact_frame
 from .models import FrameTarget, InterpolatedFrame, SyntheticCameraConfig
 from .scheduler import materialize_target, schedule_segment
 from .store import LatestJpegStore
@@ -61,6 +64,7 @@ class SyntheticCameraPipeline:
         *,
         worker: CameraWorker | None = None,
         clock: Callable[[], float] = time.monotonic,
+        on_published: Callable[[InterpolatedFrame, bytes], None] | None = None,
     ) -> None:
         config.validate()
         self.config = config
@@ -69,10 +73,13 @@ class SyntheticCameraPipeline:
             raise ValueError("camera store and profile byte limits must match")
         self._worker = worker or LatestSyntheticRenderWorker()
         self._clock = clock
+        self._on_published = on_published
         self._started = False
         self._closed = False
         self._run_id: str | None = None
         self._last_frame: SceneFrame | None = None
+        self._last_segment_sequence: int | None = None
+        self._last_submitted_target_id = -1
         self._segment: _ScheduledSegment | None = None
         self._next_frame_index = 0
         self._submitted_frames = 0
@@ -82,6 +89,7 @@ class SyntheticCameraPipeline:
         self._last_mode: str | None = None
         self._last_reason: str | None = None
         self._last_error: str | None = None
+        self._frames_by_target: dict[int, InterpolatedFrame] = {}
 
     def start(self) -> None:
         if self._closed:
@@ -96,18 +104,25 @@ class SyntheticCameraPipeline:
         self.store.clear()
         self._run_id = run_id
         self._last_frame = None
+        self._last_segment_sequence = None
+        self._last_submitted_target_id = -1
         self._segment = None
         self._next_frame_index = 0
         self._last_mode = None
         self._last_reason = None
         self._last_error = None
+        self._frames_by_target.clear()
         self._rendered_at.clear()
         self._last_render_seconds = None
 
     def _submit(self, header: SceneDefinition, frame: InterpolatedFrame) -> None:
+        if frame.target_id <= self._last_submitted_target_id:
+            return
         self._worker.submit(
             CameraRenderRequest(header=header, frame=frame, config=self.config)
         )
+        self._frames_by_target[frame.target_id] = frame
+        self._last_submitted_target_id = frame.target_id
         self._submitted_frames += 1
         self._last_mode = frame.mode
         self._last_reason = frame.reason
@@ -164,49 +179,65 @@ class SyntheticCameraPipeline:
         if not state.connected:
             self._worker.invalidate()
             self.store.clear()
+            self._frames_by_target.clear()
             self._segment = None
             self._next_frame_index = 0
             return
-        frame = state.frame
-        if header is None or frame is None:
+        segment = state.segment
+        if header is None or segment is None:
             return
-        previous = self._last_frame
-        if previous is not None and frame.sequence == previous.sequence:
+        if segment.sequence == self._last_segment_sequence:
             return
-        if previous is None:
-            self._submit(header, exact_frame(frame))
-        else:
-            self._submit_due(self._clock())
-            self._submit_segment_end()
-            targets = schedule_segment(
-                previous,
-                frame,
-                fps=self.config.video.fps,
-                timing=self.config.timing,
+        left = materialize_keyframe(
+            header, segment.left, segment.left_sequence, segment.run_id
+        )
+        right = materialize_keyframe(
+            header, segment.right, segment.right_sequence, segment.run_id
+        )
+        if self._last_frame is None:
+            initial_target_id = int(
+                left.scenario.elapsed_s * self.config.video.fps + 1e-9
             )
-            if len(targets) == 1 and targets[0].mode == "hold":
-                self._submit(
-                    header,
-                    materialize_target(
-                        previous,
-                        frame,
-                        targets[0],
-                        timing=self.config.timing,
+            self._submit(
+                header,
+                materialize_target(
+                    left,
+                    right,
+                    FrameTarget(
+                        elapsed_s=left.scenario.elapsed_s,
+                        mode="exact",
+                        target_id=initial_target_id,
                     ),
-                )
-                self._segment = None
-                self._next_frame_index = 0
-            else:
-                self._segment = _ScheduledSegment(
-                    header=header,
-                    left=previous,
-                    right=frame,
-                    targets=targets,
-                    started_at=self._clock(),
-                    origin_elapsed_s=previous.scenario.elapsed_s,
-                )
-                self._next_frame_index = 0
-        self._last_frame = frame
+                    timing=self.config.timing,
+                ),
+            )
+        self._submit_due(self._clock())
+        self._submit_segment_end()
+        targets = schedule_segment(
+            left,
+            right,
+            fps=self.config.video.fps,
+            timing=self.config.timing,
+        )
+        if len(targets) == 1 and targets[0].mode == "hold":
+            self._submit(
+                header,
+                materialize_target(left, right, targets[0], timing=self.config.timing),
+            )
+            self._segment = None
+            self._next_frame_index = 0
+        else:
+            self._segment = _ScheduledSegment(
+                header=header,
+                left=left,
+                right=right,
+                targets=targets,
+                started_at=self._clock(),
+                origin_elapsed_s=left.scenario.elapsed_s,
+            )
+            self._next_frame_index = 0
+        self._last_frame = right
+        self._last_segment_sequence = segment.sequence
 
     def _publish(self, outcome: CameraRenderOutcome, published_at: float) -> None:
         if outcome.error is not None or outcome.jpeg is None:
@@ -219,6 +250,9 @@ class SyntheticCameraPipeline:
             elapsed_s=outcome.elapsed_s,
             render_backend=outcome.render_backend or "unknown",
         )
+        frame = self._frames_by_target.pop(outcome.target_id, None)
+        if frame is not None and self._on_published is not None:
+            self._on_published(frame, outcome.jpeg)
         self._rendered_frames += 1
         self._rendered_at.append(published_at)
         while self._rendered_at[0] < published_at - self._RATE_WINDOW_S:

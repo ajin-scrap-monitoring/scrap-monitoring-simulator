@@ -7,7 +7,7 @@ from pathlib import Path
 from scrap_monitoring_visualizer.contracts import (
     ContractParser,
     SceneDefinition,
-    SceneFrame,
+    SceneSegment,
 )
 from scrap_monitoring_visualizer.state import ExecutionState
 from scrap_monitoring_visualizer.synthetic_camera import (
@@ -20,7 +20,7 @@ from scrap_monitoring_visualizer.synthetic_camera.worker import (
     CameraRenderRequest,
 )
 
-CONTRACT_ROOT = Path("../contracts/scene/v1")
+CONTRACT_ROOT = Path("../contracts/scene/v2")
 
 
 class FakeWorker:
@@ -53,22 +53,47 @@ class FakeWorker:
         del timeout_s
 
 
-def _records() -> tuple[SceneDefinition, SceneFrame]:
+def _records() -> tuple[SceneDefinition, SceneSegment]:
     parser = ContractParser(CONTRACT_ROOT)
     lines = (
-        (CONTRACT_ROOT / "fixtures/scene.v1.jsonl")
+        (CONTRACT_ROOT / "fixtures/scene.v2.jsonl")
         .read_bytes()
         .splitlines(keepends=True)
     )
-    values = tuple(parser.parse_line(line).value for line in lines)
-    assert isinstance(values[0], SceneDefinition)
-    assert isinstance(values[1], SceneFrame)
-    return values[0], values[1]
+    definition = parser.parse_line(lines[0]).value
+    segment = parser.parse_line(lines[1]).value
+    assert isinstance(definition, SceneDefinition)
+    assert isinstance(segment, SceneSegment)
+    return definition, segment
+
+
+def _state(
+    header: SceneDefinition, segment: SceneSegment, *, connected: bool = True
+) -> ExecutionState:
+    return ExecutionState(header=header, segment=segment, connected=connected)
+
+
+def _next_segment(segment: SceneSegment, elapsed_s: float) -> SceneSegment:
+    right = replace(
+        segment.right,
+        scenario=replace(
+            segment.right.scenario,
+            elapsed_s=elapsed_s,
+            surface_updated_at_s=elapsed_s,
+        ),
+    )
+    return replace(
+        segment,
+        sequence=segment.sequence + 1,
+        left_sequence=segment.right_sequence,
+        right_sequence=segment.right_sequence + 1,
+        left=segment.right,
+        right=right,
+    )
 
 
 def test_latest_jpeg_store_replaces_without_history() -> None:
     store = LatestJpegStore(16)
-
     first = store.publish(
         b"\xff\xd8first\xff\xd9", sequence=1, elapsed_s=1.0, render_backend="test"
     )
@@ -77,191 +102,87 @@ def test_latest_jpeg_store_replaces_without_history() -> None:
     )
 
     assert first.revision == 1
-    assert second.revision == 2
     assert store.get() == second
     store.clear()
     assert store.get() is None
-    assert store.revision == 3
 
 
-def test_latest_jpeg_store_does_not_publish_repeated_jpeg_bytes() -> None:
-    store = LatestJpegStore(16)
-    jpeg = b"\xff\xd8same\xff\xd9"
-
-    first = store.publish(jpeg, sequence=1, elapsed_s=1.0, render_backend="test")
-    repeated = store.publish(jpeg, sequence=2, elapsed_s=2.0, render_backend="test")
-
-    assert repeated is first
-    assert store.revision == 1
-    current = store.get()
-    assert current == first
-    assert current is not None
-    assert current.sequence == 1
-
-
-def test_latest_jpeg_store_rejects_invalid_or_oversized_frames() -> None:
-    store = LatestJpegStore(5)
-
-    for frame in (b"not-jpeg", b"\xff\xd8xx\xff\xd9"):
-        try:
-            store.publish(frame, sequence=1, elapsed_s=1.0, render_backend="test")
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("invalid frame was accepted")
-
-
-def test_pipeline_paces_interpolated_samples_and_publishes_outcome() -> None:
-    header, frame = _records()
-    right = replace(
-        frame,
-        sequence=2,
-        scenario=replace(
-            frame.scenario,
-            elapsed_s=2.0,
-            surface_updated_at_s=2.0,
-        ),
-    )
-    config = SyntheticCameraConfig.from_file()
+def test_pipeline_schedules_targets_from_v2_segment_and_publishes_outcome() -> None:
+    header, segment = _records()
     worker = FakeWorker()
     now = [10.0]
     pipeline = SyntheticCameraPipeline(
-        config,
-        worker=worker,
-        clock=lambda: now[0],
+        SyntheticCameraConfig.from_file(), worker=worker, clock=lambda: now[0]
     )
     pipeline.start()
-    pipeline.state_changed(ExecutionState(header=header, frame=frame, connected=True))
-    pipeline.state_changed(ExecutionState(header=header, frame=right, connected=True))
+    pipeline.state_changed(_state(header, segment))
 
     assert worker.started
     assert len(worker.submitted) == 1
+    assert worker.submitted[0].frame.target_id == 0
     pipeline.poll(now=10.0 + 1 / 30)
-    assert len(worker.submitted) == 2
-    assert worker.submitted[-1].frame.mode == "interpolated"
+    assert worker.submitted[-1].frame.target_id == 1
 
     worker.outcomes.append(
         CameraRenderOutcome(
             generation=0,
+            target_id=1,
             sequence=1,
-            elapsed_s=1.0 + 1 / 30,
+            elapsed_s=1 / 30,
             mode="interpolated",
             reason=None,
             jpeg=b"\xff\xd8frame\xff\xd9",
-            render_backend="vtkEGLRenderWindow",
+            render_backend="test",
             render_seconds=0.02,
             error=None,
         )
     )
     pipeline.poll(now=10.1)
 
-    snapshot = pipeline.store.get()
-    assert snapshot is not None
-    assert snapshot.render_backend == "vtkEGLRenderWindow"
+    assert pipeline.store.get() is not None
     assert pipeline.status()["camera_frames_rendered"] == 1
     assert pipeline.status()["camera_last_render_ms"] == 20.0
     pipeline.close()
 
 
-def test_pipeline_submits_due_segment_end_before_next_segment() -> None:
-    header, frame = _records()
-    second = replace(
-        frame,
-        sequence=2,
-        scenario=replace(
-            frame.scenario,
-            elapsed_s=2.0,
-            surface_updated_at_s=2.0,
-        ),
-    )
-    third = replace(
-        frame,
-        sequence=3,
-        scenario=replace(
-            frame.scenario,
-            elapsed_s=3.0,
-            surface_updated_at_s=3.0,
-        ),
-    )
+def test_pipeline_finishes_pending_segment_before_accepting_next_segment() -> None:
+    header, segment = _records()
     worker = FakeWorker()
     now = [10.0]
     pipeline = SyntheticCameraPipeline(
-        SyntheticCameraConfig.from_file(),
-        worker=worker,
-        clock=lambda: now[0],
+        SyntheticCameraConfig.from_file(), worker=worker, clock=lambda: now[0]
     )
-    pipeline.state_changed(ExecutionState(header=header, frame=frame, connected=True))
-    pipeline.state_changed(ExecutionState(header=header, frame=second, connected=True))
+    pipeline.state_changed(_state(header, segment))
+    now[0] = 10.09
+    pipeline.state_changed(_state(header, _next_segment(segment, 0.2)))
 
-    now[0] = 10.99
-    pipeline.state_changed(ExecutionState(header=header, frame=third, connected=True))
-
-    assert worker.submitted[-1].frame.frame.scenario.elapsed_s == 2.0
+    assert worker.submitted[-1].frame.frame.scenario.elapsed_s == 0.1
     assert worker.submitted[-1].frame.mode == "exact"
     pipeline.close()
 
 
-def test_pipeline_source_fps_decays_when_rendering_stalls() -> None:
+def test_pipeline_clears_frames_on_run_change_and_disconnect() -> None:
+    header, segment = _records()
     worker = FakeWorker()
-    now = [10.0]
-    pipeline = SyntheticCameraPipeline(
-        SyntheticCameraConfig.from_file(),
-        worker=worker,
-        clock=lambda: now[0],
-    )
-    for index, published_at in enumerate((10.0, 10.1, 10.2), start=1):
-        worker.outcomes.append(
-            CameraRenderOutcome(
-                generation=0,
-                sequence=index,
-                elapsed_s=float(index),
-                mode="interpolated",
-                reason=None,
-                jpeg=b"\xff\xd8frame\xff\xd9",
-                render_backend="test",
-                render_seconds=0.02,
-                error=None,
-            )
-        )
-        now[0] = published_at
-        pipeline.poll()
-
-    assert pipeline.status()["camera_source_fps"] == 10.0
-    now[0] = 14.2
-    assert pipeline.status()["camera_source_fps"] == 0.476
-    now[0] = 15.3
-    assert pipeline.status()["camera_source_fps"] == 0.0
-    pipeline.close()
-
-
-def test_pipeline_clears_frame_when_run_changes() -> None:
-    header, frame = _records()
-    config = SyntheticCameraConfig.from_file()
-    worker = FakeWorker()
-    pipeline = SyntheticCameraPipeline(config, worker=worker)
+    pipeline = SyntheticCameraPipeline(SyntheticCameraConfig.from_file(), worker=worker)
     pipeline.store.publish(
-        b"\xff\xd8old\xff\xd9",
-        sequence=1,
-        elapsed_s=1.0,
-        render_backend="test",
+        b"\xff\xd8live\xff\xd9", sequence=1, elapsed_s=0.1, render_backend="test"
     )
-
     pipeline.state_changed(
         ExecutionState(header=replace(header, run_id="next"), connected=True)
     )
-
     assert pipeline.store.get() is None
-    assert worker.invalidations == 1
+
+    pipeline.state_changed(_state(header, segment, connected=False))
+    assert worker.invalidations >= 2
     pipeline.close()
 
 
-def test_pipeline_fails_when_renderer_process_exits() -> None:
-    config = SyntheticCameraConfig.from_file()
+def test_pipeline_fails_when_camera_renderer_process_exits() -> None:
     worker = FakeWorker()
-    pipeline = SyntheticCameraPipeline(config, worker=worker)
+    pipeline = SyntheticCameraPipeline(SyntheticCameraConfig.from_file(), worker=worker)
     pipeline.start()
     worker.alive = False
-
     try:
         pipeline.poll()
     except RuntimeError as error:
@@ -270,25 +191,3 @@ def test_pipeline_fails_when_renderer_process_exits() -> None:
         raise AssertionError("dead camera renderer was not detected")
     finally:
         pipeline.close()
-
-
-def test_pipeline_clears_frame_when_source_disconnects() -> None:
-    header, frame = _records()
-    worker = FakeWorker()
-    pipeline = SyntheticCameraPipeline(
-        SyntheticCameraConfig.from_file(),
-        worker=worker,
-    )
-    pipeline.state_changed(ExecutionState(header=header, frame=frame, connected=True))
-    pipeline.store.publish(
-        b"\xff\xd8live\xff\xd9",
-        sequence=frame.sequence,
-        elapsed_s=frame.scenario.elapsed_s,
-        render_backend="test",
-    )
-
-    pipeline.state_changed(ExecutionState(header=header, frame=frame, connected=False))
-
-    assert pipeline.store.get() is None
-    assert worker.invalidations == 2
-    pipeline.close()

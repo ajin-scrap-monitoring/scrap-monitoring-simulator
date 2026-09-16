@@ -5,7 +5,6 @@ services:
     environment:
       SCRAP_SIMULATOR_SCENE_HOST: visualizer
       SCRAP_SIMULATOR_SCENE_PORT: "17000"
-      SCRAP_SIMULATOR_SCENE_INTERVAL_S: ${SCRAP_SIMULATOR_SCENE_INTERVAL_S:-1.0}
       SCRAP_SIMULATOR_MEAN_FILL_DURATION_S: ${SCRAP_SIMULATOR_MEAN_FILL_DURATION_S:-600}
     ports:
       - ${SCRAP_SIMULATOR_LIDAR_1_PORT:-8089}:8089/udp
@@ -22,7 +21,7 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m
     mem_limit: 512m
-    cpus: 2.0
+    cpus: 1.5
     pids_limit: 128
     logging:
       driver: json-file
@@ -54,8 +53,8 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=512m
-    mem_limit: 4g
-    cpus: 4.0
+    mem_limit: 3g
+    cpus: 2.0
     pids_limit: 256
     logging:
       driver: json-file

@@ -55,7 +55,7 @@ def test_browser_probe_reads_hidden_metrics_through_cdp() -> None:
         assert await _metrics(socket, 7) == snapshot
         command = json.loads(socket.sent[0])
         assert command["method"] == "Runtime.evaluate"
-        assert "__scrapCameraMetrics" in command["params"]["expression"]
+        assert "__scrapVisualMetrics" in command["params"]["expression"]
 
     asyncio.run(exercise())
 
@@ -311,6 +311,7 @@ def _result(**overrides: int | float) -> BrowserProbeResult:
         "dropped_before_decode": 0,
         "dropped_before_present": 0,
         "decode_errors": 0,
+        "target_mismatches": 0,
         "max_pending_decode": 1,
         "max_decode_inflight": 1,
         "max_pending_present": 1,
@@ -325,6 +326,8 @@ def test_browser_probe_acceptance_rejects_decode_and_queue_failures() -> None:
         _validate_result(_result(stable_samples=8))
     with pytest.raises(RuntimeError, match="decode failed"):
         _validate_result(_result(decode_errors=1))
+    with pytest.raises(RuntimeError, match="target identity diverged"):
+        _validate_result(_result(target_mismatches=1))
     with pytest.raises(RuntimeError, match="latest-only bound"):
         _validate_result(_result(max_pending_decode=2))
     with pytest.raises(RuntimeError, match="average FPS"):
@@ -348,6 +351,7 @@ def _sample(
             "dropped_before_decode": 0,
             "dropped_before_present": 0,
             "decode_errors": 0,
+            "target_mismatches": 0,
         },
         "queues": {
             "pending_decode": 0,

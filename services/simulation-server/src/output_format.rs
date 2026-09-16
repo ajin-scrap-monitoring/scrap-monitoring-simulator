@@ -37,25 +37,6 @@ impl From<&ScenarioSnapshot> for ScenarioDocument {
     }
 }
 
-#[derive(Serialize)]
-pub(crate) struct SceneSurfaceDocument<'a> {
-    cell_size_m: f64,
-    x_coordinates_m: &'a [f64],
-    y_coordinates_m: &'a [f64],
-    heights_m: HeightRows<'a>,
-}
-
-impl<'a> From<&'a SurfaceSnapshot> for SceneSurfaceDocument<'a> {
-    fn from(surface: &'a SurfaceSnapshot) -> Self {
-        Self {
-            cell_size_m: surface.cell_size_m(),
-            x_coordinates_m: surface.x_coordinates_m(),
-            y_coordinates_m: surface.y_coordinates_m(),
-            heights_m: HeightRows::new(surface),
-        }
-    }
-}
-
 pub(crate) fn validate_model_snapshot(
     snapshot: &ScenarioModelSnapshot,
 ) -> Result<(), &'static str> {
@@ -109,14 +90,14 @@ fn strictly_increasing_finite(values: &[f64]) -> bool {
         && values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
-struct HeightRows<'a> {
+pub(crate) struct HeightRows<'a> {
     heights: &'a [f64],
     row_count: usize,
     column_count: usize,
 }
 
 impl<'a> HeightRows<'a> {
-    fn new(surface: &'a SurfaceSnapshot) -> Self {
+    pub(crate) fn new(surface: &'a SurfaceSnapshot) -> Self {
         let (row_count, column_count) = surface.shape();
         Self {
             heights: surface.heights_m(),

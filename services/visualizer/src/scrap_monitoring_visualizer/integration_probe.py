@@ -1,4 +1,4 @@
-"""Verify the live browser and synthetic camera boundaries of a running server."""
+"""Verify live Browser pairs and the raw edge camera stream."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import io
 import json
+import struct
 import time
 import urllib.error
 import urllib.request
@@ -36,7 +37,6 @@ def _wait_for_live_status(base_url: str, deadline: float) -> dict[str, Any]:
                 status_code == 200
                 and status.get("connected") is True
                 and isinstance(status.get("received_sequence"), int)
-                and isinstance(status.get("rendered_sequence"), int)
                 and camera.get("camera_enabled") is True
                 and camera.get("camera_width") == 1920
                 and camera.get("camera_height") == 1080
@@ -51,6 +51,27 @@ def _wait_for_live_status(base_url: str, deadline: float) -> dict[str, Any]:
     if last_error is not None:
         raise RuntimeError("live status did not become ready") from last_error
     raise RuntimeError("live status did not become ready before the deadline")
+
+
+def _measure_unique_frames(
+    frame_messages: list[bytes], received_at: list[float]
+) -> dict[str, int | float]:
+    if not frame_messages or len(frame_messages) != len(received_at):
+        raise RuntimeError("camera frame sample is incomplete")
+    frame_digests = tuple(hashlib.sha256(frame).digest() for frame in frame_messages)
+    if len(set(frame_digests)) != len(frame_digests):
+        raise RuntimeError(
+            "camera stream repeated a JPEG during the unique frame sample"
+        )
+    network_unique_fps = (
+        (len(received_at) - 1) / (received_at[-1] - received_at[0])
+        if len(received_at) >= 2 and received_at[-1] > received_at[0]
+        else 0.0
+    )
+    return {
+        "network_unique_frames": len(frame_messages),
+        "network_unique_fps": round(network_unique_fps, 3),
+    }
 
 
 async def _check_camera(
@@ -105,25 +126,62 @@ async def _check_camera(
     }
 
 
-def _measure_unique_frames(
-    frame_messages: list[bytes],
-    received_at: list[float],
-) -> dict[str, int | float]:
-    if not frame_messages or len(frame_messages) != len(received_at):
-        raise RuntimeError("camera frame sample is incomplete")
-    frame_digests = tuple(hashlib.sha256(frame).digest() for frame in frame_messages)
-    if len(set(frame_digests)) != len(frame_digests):
-        raise RuntimeError(
-            "camera stream repeated a JPEG during the unique frame sample"
-        )
-    network_unique_fps = (
-        (len(received_at) - 1) / (received_at[-1] - received_at[0])
-        if len(received_at) >= 2 and received_at[-1] > received_at[0]
-        else 0.0
-    )
+def _decode_visual_packet(message: bytes) -> tuple[dict[str, Any], bytes]:
+    if len(message) < 4:
+        raise RuntimeError("visual packet is shorter than its header")
+    header_size = struct.unpack(">I", message[:4])[0]
+    if header_size > len(message) - 4:
+        raise RuntimeError("visual packet header exceeds packet size")
+    metadata = json.loads(message[4 : 4 + header_size])
+    if not isinstance(metadata, dict):
+        raise RuntimeError("visual packet metadata must be an object")
+    height_count = metadata.get("height_count")
+    jpeg_bytes = metadata.get("jpeg_bytes")
+    if not isinstance(height_count, int) or not isinstance(jpeg_bytes, int):
+        raise RuntimeError("visual packet metadata has invalid lengths")
+    jpeg_start = 4 + header_size + height_count * 4
+    if jpeg_start + jpeg_bytes != len(message):
+        raise RuntimeError("visual packet payload lengths are inconsistent")
+    return cast(dict[str, Any], metadata), message[jpeg_start:]
+
+
+async def _check_visual(websocket_url: str, timeout_s: float) -> dict[str, Any]:
+    async with asyncio.timeout(timeout_s):
+        async with connect(
+            websocket_url,
+            open_timeout=timeout_s,
+            close_timeout=2.0,
+            max_queue=1,
+            max_size=4_194_304,
+            compression=None,
+        ) as websocket:
+            descriptor_message = await websocket.recv()
+            message = await websocket.recv()
+    if not isinstance(descriptor_message, str) or not isinstance(message, bytes):
+        raise RuntimeError("visual stream did not provide descriptor and packet")
+    descriptor = json.loads(descriptor_message)
+    if (
+        not isinstance(descriptor, dict)
+        or descriptor.get("type") != "visual_stream_descriptor"
+        or descriptor.get("version") != 1
+        or descriptor.get("fps") != 30
+    ):
+        raise RuntimeError("unexpected visual descriptor")
+    metadata, jpeg = _decode_visual_packet(message)
+    target_id = metadata.get("target_id")
+    left_sequence = metadata.get("left_sequence")
+    right_sequence = metadata.get("right_sequence")
+    if not isinstance(target_id, int) or not isinstance(left_sequence, int):
+        raise RuntimeError("visual packet is missing shared target identity")
+    if right_sequence != left_sequence + 1:
+        raise RuntimeError("visual packet does not identify an adjacent segment")
+    with Image.open(io.BytesIO(jpeg)) as image:
+        image.load()
+        if image.format != "JPEG" or image.size != (1920, 1080):
+            raise RuntimeError("visual packet does not contain the camera JPEG")
     return {
-        "network_unique_frames": len(frame_messages),
-        "network_unique_fps": round(network_unique_fps, 3),
+        "target_id": target_id,
+        "height_count": metadata["height_count"],
     }
 
 
@@ -136,16 +194,16 @@ def run(
     deadline = time.monotonic() + timeout_s
     _wait_for_live_status(base_url, deadline)
     root_status, root_body = _get(f"{base_url}/", 3.0)
-    frame_status, frame_body = _get(f"{base_url}/frame.png", 5.0)
-    if root_status != 200 or b'new URL("/camera/v1/stream"' not in root_body:
-        raise RuntimeError("browser page does not expose both live views")
-    if frame_status != 200 or not frame_body.startswith(b"\x89PNG\r\n\x1a\n"):
-        raise RuntimeError("browser renderer did not expose a PNG frame")
+    if root_status != 200 or b"/assets/main.js" not in root_body:
+        raise RuntimeError("browser page does not expose the paired visual client")
     remaining_s = deadline - time.monotonic()
     if remaining_s <= 0.0:
-        raise RuntimeError("integration deadline expired before camera validation")
+        raise RuntimeError("integration deadline expired before stream validation")
     websocket_url = base_url.replace("http://", "ws://", 1).replace(
         "https://", "wss://", 1
+    )
+    visual = asyncio.run(
+        _check_visual(f"{websocket_url}/visual/v1/stream", remaining_s)
     )
     camera = asyncio.run(
         _check_camera(f"{websocket_url}/camera/v1/stream", remaining_s)
@@ -160,11 +218,10 @@ def run(
     synthetic_camera = current_status["synthetic_camera"]
     return {
         "received_sequence": current_status["received_sequence"],
-        "rendered_sequence": current_status["rendered_sequence"],
         "camera_rendered_sequence": synthetic_camera["camera_rendered_sequence"],
         "camera_render_backend": synthetic_camera["camera_render_backend"],
         "camera_source_fps": synthetic_camera["camera_source_fps"],
-        "browser_png_bytes": len(frame_body),
+        "visual": visual,
         **camera,
     }
 
@@ -181,8 +238,7 @@ def main() -> None:
         parser.error("--minimum-network-fps must be positive")
     print(
         json.dumps(
-            run(args.base_url, args.timeout, args.minimum_network_fps),
-            sort_keys=True,
+            run(args.base_url, args.timeout, args.minimum_network_fps), sort_keys=True
         )
     )
 

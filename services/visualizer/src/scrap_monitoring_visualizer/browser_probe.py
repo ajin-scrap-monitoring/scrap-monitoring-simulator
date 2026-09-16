@@ -31,6 +31,7 @@ class BrowserProbeResult:
     dropped_before_decode: int
     dropped_before_present: int
     decode_errors: int
+    target_mismatches: int
     max_pending_decode: int
     max_decode_inflight: int
     max_pending_present: int
@@ -125,8 +126,8 @@ async def _metrics(websocket: Any, command_id: int) -> dict[str, Any] | None:
         "Runtime.evaluate",
         {
             "expression": (
-                "window.__scrapCameraMetrics?"
-                "JSON.stringify(window.__scrapCameraMetrics.snapshot()):null"
+                "window.__scrapVisualMetrics?"
+                "JSON.stringify(window.__scrapVisualMetrics.snapshot()):null"
             ),
             "returnByValue": True,
         },
@@ -245,6 +246,11 @@ def _validate_result(result: BrowserProbeResult) -> None:
             "Browser camera decode failed: "
             f"{json.dumps(asdict(result), sort_keys=True)}"
         )
+    if result.target_mismatches > 0:
+        raise RuntimeError(
+            "Browser visual target identity diverged: "
+            f"{json.dumps(asdict(result), sort_keys=True)}"
+        )
     if (
         max(
             result.max_pending_decode,
@@ -348,6 +354,9 @@ def _summarize_samples(
             baseline, latest, "browser", "dropped_before_present"
         ),
         decode_errors=_counter_delta(baseline, latest, "browser", "decode_errors"),
+        target_mismatches=_counter_delta(
+            baseline, latest, "browser", "target_mismatches"
+        ),
         max_pending_decode=max(
             round(_number(queues, "pending_decode")) for queues in queue_samples
         ),

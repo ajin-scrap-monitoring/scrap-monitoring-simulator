@@ -46,8 +46,6 @@ enum Command {
         scene_host: String,
         #[arg(long, env = "SCRAP_SIMULATOR_SCENE_PORT", default_value_t = 17_000)]
         scene_port: u16,
-        #[arg(long, env = "SCRAP_SIMULATOR_SCENE_INTERVAL_S", default_value_t = 1.0)]
-        scene_interval_s: f64,
         #[arg(long, env = "SCRAP_SIMULATOR_MEAN_FILL_DURATION_S")]
         mean_fill_duration_s: Option<f64>,
     },
@@ -76,7 +74,6 @@ pub async fn execute() -> Result<(), String> {
             lidar_2_bind,
             scene_host,
             scene_port,
-            scene_interval_s,
             mean_fill_duration_s,
         } => {
             let summary = crate::runtime::run(RuntimeSettings {
@@ -85,7 +82,6 @@ pub async fn execute() -> Result<(), String> {
                 lidar_2_bind,
                 scene_host,
                 scene_port,
-                scene_interval_s,
                 mean_fill_duration_s,
             })
             .await

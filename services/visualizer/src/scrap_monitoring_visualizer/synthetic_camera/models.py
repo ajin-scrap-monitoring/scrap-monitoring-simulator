@@ -110,6 +110,7 @@ class InterpolatedFrame:
     left_inlet_index: int | None
     right_inlet_index: int | None
     reason: str | None = None
+    target_id: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +118,7 @@ class FrameTarget:
     elapsed_s: float
     mode: InterpolationMode
     reason: str | None = None
+    target_id: int = 0
 
 
 @dataclass(frozen=True, slots=True)

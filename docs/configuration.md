@@ -2,7 +2,7 @@
 
 ## Simulation server
 
-기본 설정은 `services/simulation-server/config/`의 다음 3개 파일로 구성한다.
+기본 설정은 `services/simulation-server/config/`의 3개 파일로 구성한다.
 
 | 파일 | 책임 |
 | --- | --- |
@@ -10,8 +10,7 @@
 | `environment.v1.json` | 공개 합성 geometry와 sensor 2대 pose |
 | `quality-profile.v1.json` | Sensor별 유효 및 무효 거리 quality 분포 |
 
-참조 파일 경로는 주 설정 파일을 기준으로 해석한다. `SCRAP_SIMULATOR_CONFIG`는 주 설정
-파일을 선택한다. Runtime endpoint는 다음 환경 변수로 설정한다.
+참조 파일 경로는 주 설정 파일을 기준으로 해석한다. `SCRAP_SIMULATOR_CONFIG`는 주 설정 파일을 선택한다.
 
 | 환경 변수 | 기본값 | 책임 |
 | --- | --- | --- |
@@ -19,12 +18,9 @@
 | `SCRAP_SIMULATOR_LIDAR_2_BIND` | `0.0.0.0:8090` | 두 번째 S2E UDP bind |
 | `SCRAP_SIMULATOR_SCENE_HOST` | `visualizer` | Scene stream 수신 host |
 | `SCRAP_SIMULATOR_SCENE_PORT` | `17000` | Scene stream TCP port |
-| `SCRAP_SIMULATOR_SCENE_INTERVAL_S` | `1.0` | Scene snapshot 간격 |
 | `SCRAP_SIMULATOR_MEAN_FILL_DURATION_S` | `600` | 평균 적재 주기 override |
 
 `check` command는 설정과 참조 파일을 읽고 sensor identifier 대응을 검증한다.
-
-기본 적재면 설정은 다음과 같다.
 
 | 설정 | 기본값 | 책임 |
 | --- | --- | --- |
@@ -49,14 +45,9 @@ Visualizer의 `live` command는 TCP scene receiver와 HTTP server를 함께 실�
 | `SCRAP_MONITORING_VISUALIZER_CAMERA_PROFILE` | Package 기본 profile | Camera profile 경로 |
 | `SCRAP_MONITORING_VISUALIZER_CAMERA_BACKEND` | `osmesa` | `auto`, `osmesa` 또는 `egl` renderer |
 
-Camera profile v1의 외부 출력은 1920 x 1080, 30 FPS MJPEG로 고정한다. Package 기본 profile의
-최대 JPEG 크기는 4,194,304 byte이며 `video.raster_width`와 `video.raster_height`의 기본값은
-640과 360이다. CPU camera renderer는
-이 크기의 RGB raster를 만들고 재사용하는 VTK linear scaler로 output 크기까지 확장한 뒤
-Pillow로 JPEG를 한 번 encoding한다. Camera가 활성화되면 profile의 배경, 바닥, 벽과 적재물
-색을 Browser 3D 모델에도 적용한다.
+Camera profile v1의 외부 출력은 1920 x 1080, 30 Frames Per Second (FPS) Motion JPEG (MJPEG)다. CPU camera renderer는 640 x 360 RGB raster를 만들고 재사용하는 Visualization Toolkit (VTK) linear scaler로 output 크기까지 확장한 뒤 Pillow로 JPEG를 한 번 encoding한다.
 
-기본 camera machine 설정은 다음과 같다.
+Browser는 `/visual/v1/stream`에서 camera profile의 배경, 외벽, 스크랩과 chute 색을 descriptor로 받고 WebGL model에 적용한다. Browser 3D model은 높이 colormap과 machine geometry를 사용하지 않는다. 투입 지점 표식은 적재면 교차점까지 수직선으로 연결한다. Browser page는 두 장면의 공통 scene 수치를 영상 아래에 표시하며 runtime status와 diagnostics는 표시하지 않는다.
 
 | 설정 | 기본값 | 책임 |
 | --- | --- | --- |
@@ -69,19 +60,7 @@ Pillow로 JPEG를 한 번 encoding한다. Camera가 활성화되면 profile의 �
 | `tip_fraction` | `0.75` | 끝단 하강이 시작되는 길이 비율 |
 | `tip_drop_m` | `0.08` | Chute 끝단 하강 높이 |
 
-Browser 3D 모델은 높이 colormap을 사용하지 않는다. 투입 지점 표식은 적재면 교차점까지
-수직선으로 연결한다. Browser 페이지는 두 장면의 공통 scene 수치를 영상 아래에 표시하며
-runtime status와 camera diagnostics는 표시하지 않는다.
-
-Root `/status`의 synthetic camera 항목은 `camera_source_fps`,
-`camera_source_fps_window_s`, `camera_last_render_ms`, `camera_frames_rendered`와
-`camera_pending_replaced`를 포함한다. `/camera/v1/status`는 같은 source 상태와
-`camera_stream_delivery: revision-only`를 반환한다.
-
-Browser는 수신, decode와 presentation 진단을 화면에 표시하지 않는다. Browser console의
-`window.__scrapCameraMetrics.snapshot()`은 root의 `sampled_at_ms` monotonic timestamp와
-`source`, `network`, `browser` 및 `queues`를 구분한 현재 snapshot을 반환한다. 진단값은
-runtime 조정 입력이 아니다.
+`/status`와 `/camera/v1/status`는 camera source cadence와 render 상태를 제공한다. Browser console의 `window.__scrapVisualMetrics.snapshot()`은 source, network, Browser와 queue의 현재 snapshot을 반환한다. `window.__scrapCameraMetrics`는 기존 Browser probe 호환 alias다.
 
 ## Camera edge bridge
 
@@ -92,7 +71,7 @@ Camera edge bridge는 다음 환경 변수만 읽는다.
 | `SCRAP_SYNTHETIC_CAMERA_SERVER_URL` | 필수 | `/camera/v1/stream` WebSocket URL |
 | `SCRAP_SYNTHETIC_CAMERA_DEVICE` | `/dev/scrap-synthetic-camera` | V4L2 output device |
 | `SCRAP_SYNTHETIC_CAMERA_CONNECT_TIMEOUT_MS` | `5000` | TCP connect timeout |
-| `SCRAP_SYNTHETIC_CAMERA_IO_TIMEOUT_MS` | `1000` | WebSocket 및 device I/O timeout |
+| `SCRAP_SYNTHETIC_CAMERA_IO_TIMEOUT_MS` | `1000` | WebSocket와 device I/O timeout |
 | `SCRAP_SYNTHETIC_CAMERA_RECONNECT_INITIAL_MS` | `500` | 최초 reconnect delay |
 | `SCRAP_SYNTHETIC_CAMERA_RECONNECT_MAX_MS` | `30000` | 최대 reconnect delay |
 
@@ -100,6 +79,6 @@ URL은 credential과 query가 없는 `ws` scheme, 명시적 port와 고정 strea
 
 ## 환경 파일과 자격 증명
 
-`deploy/server/.env.example`과 `deploy/edge/.env.example`은 공개 가능한 image digest, endpoint,
-device와 timeout 설정만 관리한다. 실제 실행값은 Git에서 제외한 `.env`에 둔다. 현재 세
-service가 읽는 runtime credential은 0개이며 Compose도 Docker secret을 선언하지 않는다.
+`deploy/server/.env.example`과 `deploy/edge/.env.example`은 공개 가능한 image digest, endpoint, device와 timeout 설정의 schema다. 실제 실행값은 Git에서 제외한 `.env`에 둔다. 현재 service가 읽는 runtime credential은 없고 Compose도 Docker secret을 선언하지 않는다.
+
+인증 도입 시 Compose는 host 비밀 파일을 Docker secret으로 `/run/secrets`에 mount한다. Service는 `*_FILE` 경로만 읽고 평문 credential 환경 변수, `.env.example`, image와 Git 이력의 credential 값을 거부한다.

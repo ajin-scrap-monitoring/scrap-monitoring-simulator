@@ -11,6 +11,8 @@ from scrap_monitoring_visualizer.contracts import (
     ContractParser,
     SceneDefinition,
     SceneFrame,
+    SceneSegment,
+    materialize_keyframe,
 )
 from scrap_monitoring_visualizer.synthetic_camera import SyntheticCameraConfig
 from scrap_monitoring_visualizer.synthetic_camera.models import InterpolatedFrame
@@ -24,13 +26,13 @@ from scrap_monitoring_visualizer.synthetic_camera.renderer import (
     camera_placement,
 )
 
-CONTRACT_ROOT = Path("../contracts/scene/v1")
+CONTRACT_ROOT = Path("../contracts/scene/v2")
 
 
 def _header() -> SceneDefinition:
     parser = ContractParser(CONTRACT_ROOT)
     line = (
-        (CONTRACT_ROOT / "fixtures/scene.v1.jsonl")
+        (CONTRACT_ROOT / "fixtures/scene.v2.jsonl")
         .read_bytes()
         .splitlines(keepends=True)[0]
     )
@@ -42,14 +44,17 @@ def _header() -> SceneDefinition:
 def _machine_scene() -> tuple[SceneDefinition, SceneFrame]:
     parser = ContractParser(CONTRACT_ROOT)
     lines = (
-        (CONTRACT_ROOT / "fixtures/scene.v1.jsonl")
+        (CONTRACT_ROOT / "fixtures/scene.v2.jsonl")
         .read_bytes()
         .splitlines(keepends=True)
     )
     header = parser.parse_line(lines[0]).value
-    frame = parser.parse_line(lines[1]).value
+    segment = parser.parse_line(lines[1]).value
     assert isinstance(header, SceneDefinition)
-    assert isinstance(frame, SceneFrame)
+    assert isinstance(segment, SceneSegment)
+    frame = materialize_keyframe(
+        header, segment.right, segment.right_sequence, segment.run_id
+    )
     return (
         replace(
             header,

@@ -10,13 +10,13 @@ from scrap_monitoring_visualizer.contracts import (
     ContractError,
     ContractParser,
     SceneDefinition,
-    SceneFrame,
+    SceneSegment,
 )
 from scrap_monitoring_visualizer.state import (
     ExecutionState,
     StateError,
-    accept_frame,
     accept_header,
+    accept_segment,
     disconnect,
 )
 
@@ -79,7 +79,7 @@ class SceneReceiver:
             )
             accepted_header = True
             for raw_line in pending:
-                self._process_frame(raw_line)
+                self._process_segment(raw_line)
             if framing_error is not None:
                 raise framing_error
             while data := await reader.read(65_536):
@@ -87,10 +87,10 @@ class SceneReceiver:
                     records = framer.feed(data)
                 except LineFramingError as error:
                     for raw_line in error.completed_records:
-                        self._process_frame(raw_line)
+                        self._process_segment(raw_line)
                     raise
                 for raw_line in records:
-                    self._process_frame(raw_line)
+                    self._process_segment(raw_line)
         except TimeoutError:
             self._connection_error("header timeout")
         except (
@@ -138,14 +138,14 @@ class SceneReceiver:
             return records[1:], framing_error
         raise _ConnectionRejected("connection ended before a stream header")
 
-    def _process_frame(self, raw_line: bytes) -> None:
+    def _process_segment(self, raw_line: bytes) -> None:
         try:
             parsed = self._parser.parse_line(raw_line)
-            if not isinstance(parsed.value, SceneFrame):
+            if not isinstance(parsed.value, SceneSegment):
                 raise StateError(
-                    "record_type", "header is only valid as the first record"
+                    "record_type", "definition is only valid as the first record"
                 )
-            self.state = accept_frame(self.state, parsed.value).state
+            self.state = accept_segment(self.state, parsed.value).state
         except (ContractError, StateError) as error:
             self.snapshot = replace(
                 self.snapshot,
