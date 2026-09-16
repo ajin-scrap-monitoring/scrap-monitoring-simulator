@@ -212,6 +212,8 @@ async def run_live(config: LiveConfig) -> int:
             ws_max_queue=1,
             ws_max_size=4_096,
             ws_per_message_deflate=False,
+            ws_ping_interval=0.5,
+            ws_ping_timeout=2.0,
         )
     )
 

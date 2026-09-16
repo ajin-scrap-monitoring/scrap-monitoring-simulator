@@ -40,6 +40,7 @@ pub struct RuntimeSettings {
     pub scene_host: String,
     pub scene_port: u16,
     pub scene_interval_s: f64,
+    pub mean_fill_duration_s: Option<f64>,
 }
 
 impl RuntimeSettings {
@@ -62,6 +63,14 @@ impl RuntimeSettings {
         if !self.scene_interval_s.is_finite() || self.scene_interval_s <= 0.0 {
             return Err(ApplicationError::Invalid(
                 "scene interval must be finite and positive",
+            ));
+        }
+        if self
+            .mean_fill_duration_s
+            .is_some_and(|duration| !duration.is_finite() || duration <= 0.0)
+        {
+            return Err(ApplicationError::Invalid(
+                "mean fill duration must be finite and positive",
             ));
         }
         Ok(())
@@ -107,7 +116,10 @@ pub enum ApplicationError {
 
 pub async fn run(settings: RuntimeSettings) -> Result<ApplicationSummary, ApplicationError> {
     settings.validate()?;
-    let inputs = load_simulator_inputs(&settings.config_path)?;
+    let mut inputs = load_simulator_inputs(&settings.config_path)?;
+    if let Some(duration) = settings.mean_fill_duration_s {
+        inputs.simulator.scenario.mean_fill_duration_s = duration;
+    }
     let fingerprint = input_fingerprint(&settings.config_path, &inputs)?;
     let run_id = Uuid::new_v4().to_string();
     let generation = GenerationRuntime::from_inputs(&inputs)?;
@@ -345,6 +357,15 @@ fn input_fingerprint(path: &Path, inputs: &SimulatorInputs) -> Result<String, Ap
         hasher.update((bytes.len() as u64).to_le_bytes());
         hasher.update(bytes);
     }
+    hasher.update(b"effective-mean-fill-duration-s");
+    hasher.update(
+        inputs
+            .simulator
+            .scenario
+            .mean_fill_duration_s
+            .to_bits()
+            .to_le_bytes(),
+    );
     let digest = hasher.finalize();
     let mut encoded = String::with_capacity(digest.len() * 2);
     for byte in digest {
@@ -397,6 +418,24 @@ mod tests {
             scene_host: "127.0.0.1".into(),
             scene_port: 17_000,
             scene_interval_s: 1.0,
+            mean_fill_duration_s: None,
+        };
+        assert!(matches!(
+            settings.validate(),
+            Err(ApplicationError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn runtime_settings_reject_invalid_mean_fill_duration_override() {
+        let settings = RuntimeSettings {
+            config_path: "config/simulation-server.v1.json".into(),
+            lidar_1_bind: "127.0.0.1:8089".parse().unwrap(),
+            lidar_2_bind: "127.0.0.1:8090".parse().unwrap(),
+            scene_host: "127.0.0.1".into(),
+            scene_port: 17_000,
+            scene_interval_s: 1.0,
+            mean_fill_duration_s: Some(0.0),
         };
         assert!(matches!(
             settings.validate(),
@@ -407,7 +446,7 @@ mod tests {
     #[test]
     fn input_fingerprint_is_stable_and_lowercase_hex() {
         let path = Path::new("config/simulation-server.v1.json");
-        let inputs = load_simulator_inputs(path).unwrap();
+        let mut inputs = load_simulator_inputs(path).unwrap();
         let first = input_fingerprint(path, &inputs).unwrap();
         let second = input_fingerprint(path, &inputs).unwrap();
         assert_eq!(first, second);
@@ -417,5 +456,7 @@ mod tests {
                 .bytes()
                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         );
+        inputs.simulator.scenario.mean_fill_duration_s = 601.0;
+        assert_ne!(first, input_fingerprint(path, &inputs).unwrap());
     }
 }

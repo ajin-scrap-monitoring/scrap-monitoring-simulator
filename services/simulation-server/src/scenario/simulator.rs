@@ -3,6 +3,7 @@ use std::f64::consts::TAU;
 use crate::{
     MAX_INLET_POSITIONS,
     configuration::{ScenarioConfig, SimulatorInputs},
+    decimal_ratio::PositiveRatio,
     geometry::{Polygon2, Vec2},
     randomness::{ModelRng, RandomSource, StreamScope},
     rate_profile::{SmoothRateProfile, create_smooth_rate_profile},
@@ -63,6 +64,7 @@ pub struct ScenarioSettings {
     inlet_switch_height_difference_m: f64,
     inlet_comparison_radius_m: f64,
     surface_update_interval_s: f64,
+    surface_update_interval: PositiveRatio,
     pile_spread_radius_m: f64,
     roughness_height_range_m: [f64; 2],
     roughness_radius_range_m: [f64; 2],
@@ -71,6 +73,12 @@ pub struct ScenarioSettings {
 impl ScenarioSettings {
     pub fn from_config(config: &ScenarioConfig) -> Result<Self> {
         validate_scenario_config(config)?;
+        let surface_update_interval =
+            PositiveRatio::from_decimal_f64s(config.surface.update_interval_s, 1.0).ok_or(
+                ScenarioError::Invalid(
+                    "surface update interval must be representable as a decimal ratio",
+                ),
+            )?;
         if config.inlet_positions_xy_m.is_empty() {
             return Err(ScenarioError::Invalid(
                 "scenario must contain at least one inlet position",
@@ -115,6 +123,7 @@ impl ScenarioSettings {
             inlet_switch_height_difference_m: config.inlet_switch_height_difference_m,
             inlet_comparison_radius_m: config.inlet_comparison_radius_m,
             surface_update_interval_s: config.surface.update_interval_s,
+            surface_update_interval,
             pile_spread_radius_m: config.surface.pile_spread_radius_m,
             roughness_height_range_m: config.surface.roughness_height_range_m,
             roughness_radius_range_m: config.surface.roughness_radius_range_m,
@@ -440,7 +449,13 @@ impl ScenarioSimulator {
     }
 
     fn next_update_time(&self) -> Result<f64> {
-        let value = self.settings.surface_update_interval_s * self.next_update_index as f64;
+        let value = self
+            .settings
+            .surface_update_interval
+            .multiple_to_f64(self.next_update_index)
+            .ok_or(ScenarioError::State(
+                "scenario update schedule cannot advance finitely",
+            ))?;
         if !value.is_finite() || value <= self.surface_updated_at_s {
             return Err(ScenarioError::State(
                 "scenario update schedule cannot advance finitely",
@@ -860,5 +875,37 @@ fn empty_fill_plan() -> FillPlan {
         target_volume_m3: 0.0,
         rate_profile: SmoothRateProfile::new(1.0, Vec::new())
             .expect("the internal empty rate profile is valid"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use crate::configuration::load_simulator_inputs;
+
+    use super::build_scenario_simulator;
+
+    #[test]
+    fn public_decimal_update_schedule_has_no_long_running_multiplication_drift() {
+        let inputs = load_simulator_inputs(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("config/simulation-server.v1.json"),
+        )
+        .unwrap();
+        let mut simulator = build_scenario_simulator(&inputs).unwrap();
+
+        for (index, expected_bits) in [
+            (3, 0x3fd3_3333_3333_3333),
+            (6, 0x3fe3_3333_3333_3333),
+            (7, 0x3fe6_6666_6666_6666),
+            (12, 0x3ff3_3333_3333_3333),
+            (3_212_757, 0x4113_9bee_cccc_cccd),
+        ] {
+            simulator.next_update_index = index;
+            assert_eq!(
+                simulator.next_update_time().unwrap().to_bits(),
+                expected_bits
+            );
+        }
     }
 }

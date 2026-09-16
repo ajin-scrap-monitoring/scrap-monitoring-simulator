@@ -33,6 +33,64 @@ class SceneGeometry:
     volume_sides: Mesh
 
 
+@dataclass(frozen=True, slots=True)
+class SceneGeometryTopology:
+    """Static clipping result that materializes only changing vertex heights."""
+
+    run_id: str
+    floor_z_m: float
+    cell_size_m: float
+    x_coordinates_m: tuple[float, ...]
+    y_coordinates_m: tuple[float, ...]
+    floor: Mesh
+    walls: Mesh
+    surface_xy: tuple[Point2, ...]
+    surface_faces: tuple[Triangle, ...]
+    surface_boundary_edges: tuple[tuple[int, int], ...]
+
+    def materialize(self, frame: SceneFrame) -> SceneGeometry:
+        if frame.run_id != self.run_id:
+            raise ValueError("frame run_id does not match geometry topology")
+        surface = frame.surface
+        if (
+            surface.cell_size_m != self.cell_size_m
+            or surface.x_coordinates_m != self.x_coordinates_m
+            or surface.y_coordinates_m != self.y_coordinates_m
+        ):
+            raise ValueError("frame grid does not match geometry topology")
+
+        surface_vertices = tuple(
+            (x_m, y_m, surface_height_at(frame, x_m, y_m))
+            for x_m, y_m in self.surface_xy
+        )
+        volume_vertices: list[Point3] = []
+        volume_faces: list[Triangle] = []
+        for start_index, end_index in self.surface_boundary_edges:
+            top_start = surface_vertices[start_index]
+            top_end = surface_vertices[end_index]
+            offset = len(volume_vertices)
+            volume_vertices.extend(
+                (
+                    top_start,
+                    (top_start[0], top_start[1], self.floor_z_m),
+                    (top_end[0], top_end[1], self.floor_z_m),
+                    top_end,
+                )
+            )
+            volume_faces.extend(
+                (
+                    (offset, offset + 1, offset + 2),
+                    (offset, offset + 2, offset + 3),
+                )
+            )
+        return SceneGeometry(
+            floor=self.floor,
+            walls=self.walls,
+            surface=Mesh(surface_vertices, self.surface_faces),
+            volume_sides=Mesh(tuple(volume_vertices), tuple(volume_faces)),
+        )
+
+
 class _MeshBuilder:
     def __init__(self) -> None:
         self.vertices: list[Point3] = []
@@ -297,6 +355,19 @@ def _build_volume_sides(surface: Mesh, floor_z_m: float) -> Mesh:
     return builder.build()
 
 
+def _surface_boundary_edges(surface: Mesh) -> tuple[tuple[int, int], ...]:
+    edge_counts: dict[tuple[int, int], int] = {}
+    oriented_edges: dict[tuple[int, int], tuple[int, int]] = {}
+    for face in surface.faces:
+        for edge_start, edge_end in zip(face, face[1:] + face[:1], strict=True):
+            key = (min(edge_start, edge_end), max(edge_start, edge_end))
+            edge_counts[key] = edge_counts.get(key, 0) + 1
+            oriented_edges.setdefault(key, (edge_start, edge_end))
+    return tuple(
+        oriented_edges[key] for key in sorted(edge_counts) if edge_counts[key] == 1
+    )
+
+
 def build_scene_geometry(header: SceneDefinition, frame: SceneFrame) -> SceneGeometry:
     if frame.run_id != header.run_id:
         raise ValueError("frame run_id does not match header")
@@ -337,4 +408,24 @@ def build_scene_geometry(header: SceneDefinition, frame: SceneFrame) -> SceneGeo
         walls=wall_builder.build(),
         surface=surface,
         volume_sides=_build_volume_sides(surface, header.scene.floor_z_m),
+    )
+
+
+def build_scene_geometry_topology(
+    header: SceneDefinition,
+    frame: SceneFrame,
+) -> SceneGeometryTopology:
+    geometry = build_scene_geometry(header, frame)
+    surface = frame.surface
+    return SceneGeometryTopology(
+        run_id=header.run_id,
+        floor_z_m=header.scene.floor_z_m,
+        cell_size_m=surface.cell_size_m,
+        x_coordinates_m=surface.x_coordinates_m,
+        y_coordinates_m=surface.y_coordinates_m,
+        floor=geometry.floor,
+        walls=geometry.walls,
+        surface_xy=tuple((x_m, y_m) for x_m, y_m, _ in geometry.surface.vertices),
+        surface_faces=geometry.surface.faces,
+        surface_boundary_edges=_surface_boundary_edges(geometry.surface),
     )

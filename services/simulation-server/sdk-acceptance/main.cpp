@@ -13,6 +13,8 @@
 
 namespace {
 
+constexpr std::uint32_t kControlTimeoutMs = 5'000;
+
 struct SensorResult {
     int port;
     std::size_t node_count;
@@ -43,8 +45,8 @@ SensorResult accept_sensor(int port) {
 
     sl_lidar_response_device_info_t info{};
     sl_lidar_response_device_health_t health{};
-    require_result(driver->getDeviceInfo(info, 2'000), "getDeviceInfo");
-    require_result(driver->getHealth(health, 2'000), "getHealth");
+    require_result(driver->getDeviceInfo(info, kControlTimeoutMs), "getDeviceInfo");
+    require_result(driver->getHealth(health, kControlTimeoutMs), "getHealth");
     if (info.firmware_version < 0x0118) {
         throw std::runtime_error("firmware does not advertise configuration support");
     }
@@ -75,7 +77,7 @@ SensorResult accept_sensor(int port) {
         throw std::runtime_error("SDK returned no measured HQ nodes");
     }
 
-    require_result(driver->stop(2'000), "stop");
+    require_result(driver->stop(kControlTimeoutMs), "stop");
     driver->disconnect();
     return SensorResult{port, count, measured_count, mode};
 }

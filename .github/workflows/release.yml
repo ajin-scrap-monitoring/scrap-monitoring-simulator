@@ -6,14 +6,18 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
-  release:
-    name: Release
+  validate:
+    name: Validate release
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 10
+    outputs:
+      edge_image: ${{ steps.release.outputs.edge_image }}
+      server_image: ${{ steps.release.outputs.server_image }}
+      version: ${{ steps.release.outputs.version }}
+      visualizer_image: ${{ steps.release.outputs.visualizer_image }}
 
     steps:
       - name: Check out repository
@@ -21,6 +25,24 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Reject an existing GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_QUERY: query($owner:String!,$name:String!,$tag:String!){repository(owner:$owner,name:$name){release(tagName:$tag){id}}}
+        shell: bash
+        run: |
+          repository_name="${GITHUB_REPOSITORY#*/}"
+          existing_release="$(gh api graphql \
+            -f query="$RELEASE_QUERY" \
+            -F owner="$GITHUB_REPOSITORY_OWNER" \
+            -F name="$repository_name" \
+            -F tag="$GITHUB_REF_NAME" \
+            --jq '.data.repository.release.id // empty')"
+          if [[ -n "$existing_release" ]]; then
+            echo "GitHub Release $GITHUB_REF_NAME already exists" >&2
+            exit 1
+          fi
 
       - name: Validate release target
         id: release
@@ -47,6 +69,30 @@ jobs:
                   observed = tomllib.load(source)[table]["version"]
               if observed != expected:
                   raise SystemExit(f"{path} version {observed} differs from {expected}")
+
+          locks = (
+              (
+                  "services/simulation-server/Cargo.lock",
+                  "scrap-monitoring-simulation-server",
+              ),
+              (
+                  "services/camera-edge-bridge/Cargo.lock",
+                  "scrap-synthetic-camera-bridge",
+              ),
+              ("services/visualizer/uv.lock", "scrap-monitoring-visualizer"),
+          )
+          for path, package_name in locks:
+              with open(path, "rb") as source:
+                  packages = tomllib.load(source)["package"]
+              versions = [
+                  package["version"]
+                  for package in packages
+                  if package["name"] == package_name
+              ]
+              if versions != [expected]:
+                  raise SystemExit(
+                      f"{path} package {package_name} versions {versions} differ from {expected}"
+                  )
           PY
           version="${GITHUB_REF_NAME#v}"
           repository_owner="${GITHUB_REPOSITORY_OWNER,,}"
@@ -57,11 +103,22 @@ jobs:
             echo "edge_image=ghcr.io/$repository_owner/scrap-monitoring-simulator-camera-edge-bridge"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Set up ARM64 emulation
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+  publish-server:
+    name: Publish simulation server
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          image: docker.io/tonistiigi/binfmt:qemu-v10.2.3-68@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
-          platforms: arm64
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -69,12 +126,6 @@ jobs:
           version: v0.37.1
           driver-opts: |
             image=docker.io/moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3
-
-      - name: Validate release source
-        env:
-          BUILD_REVISION: ${{ github.sha }}
-          BUILD_VERSION: ${{ steps.release.outputs.version }}
-        run: scripts/check.sh
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -84,7 +135,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish simulation server image
-        id: server
+        id: image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -93,16 +144,49 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ steps.release.outputs.server_image }}:${{ steps.release.outputs.version }}
-            ${{ steps.release.outputs.server_image }}:sha-${{ github.sha }}
+            ${{ needs.validate.outputs.server_image }}:${{ needs.validate.outputs.version }}
+            ${{ needs.validate.outputs.server_image }}:sha-${{ github.sha }}
           build-args: |
             BUILD_REVISION=${{ github.sha }}
-            BUILD_VERSION=${{ steps.release.outputs.version }}
+            BUILD_VERSION=${{ needs.validate.outputs.version }}
+          cache-from: type=gha,scope=simulation-server-linux-amd64
+          cache-to: type=gha,mode=max,scope=simulation-server-linux-amd64,ignore-error=true
           provenance: mode=max
           sbom: true
 
+  publish-visualizer:
+    name: Publish visualizer
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.37.1
+          driver-opts: |
+            image=docker.io/moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish visualizer image
-        id: visualizer
+        id: image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -111,16 +195,49 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ steps.release.outputs.visualizer_image }}:${{ steps.release.outputs.version }}
-            ${{ steps.release.outputs.visualizer_image }}:sha-${{ github.sha }}
+            ${{ needs.validate.outputs.visualizer_image }}:${{ needs.validate.outputs.version }}
+            ${{ needs.validate.outputs.visualizer_image }}:sha-${{ github.sha }}
           build-args: |
             BUILD_REVISION=${{ github.sha }}
-            BUILD_VERSION=${{ steps.release.outputs.version }}
+            BUILD_VERSION=${{ needs.validate.outputs.version }}
+          cache-from: type=gha,scope=visualizer-linux-amd64
+          cache-to: type=gha,mode=max,scope=visualizer-linux-amd64,ignore-error=true
           provenance: mode=max
           sbom: true
 
+  publish-edge:
+    name: Publish camera edge bridge
+    needs: validate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.37.1
+          driver-opts: |
+            image=docker.io/moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish camera edge bridge image
-        id: edge
+        id: image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -129,23 +246,44 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: |
-            ${{ steps.release.outputs.edge_image }}:${{ steps.release.outputs.version }}
-            ${{ steps.release.outputs.edge_image }}:sha-${{ github.sha }}
+            ${{ needs.validate.outputs.edge_image }}:${{ needs.validate.outputs.version }}
+            ${{ needs.validate.outputs.edge_image }}:sha-${{ github.sha }}
           build-args: |
             BUILD_REVISION=${{ github.sha }}
-            BUILD_VERSION=${{ steps.release.outputs.version }}
+            BUILD_VERSION=${{ needs.validate.outputs.version }}
+          cache-from: type=gha,scope=camera-edge-bridge-linux-arm64
+          cache-to: type=gha,mode=max,scope=camera-edge-bridge-linux-arm64,ignore-error=true
           provenance: mode=max
           sbom: true
 
-      - name: Create release inventory
+  release:
+    name: Release
+    needs:
+      - validate
+      - publish-server
+      - publish-visualizer
+      - publish-edge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create release assets
         shell: bash
         env:
-          EDGE_DIGEST: ${{ steps.edge.outputs.digest }}
-          EDGE_IMAGE: ${{ steps.release.outputs.edge_image }}
-          SERVER_DIGEST: ${{ steps.server.outputs.digest }}
-          SERVER_IMAGE: ${{ steps.release.outputs.server_image }}
-          VISUALIZER_DIGEST: ${{ steps.visualizer.outputs.digest }}
-          VISUALIZER_IMAGE: ${{ steps.release.outputs.visualizer_image }}
+          EDGE_DIGEST: ${{ needs.publish-edge.outputs.digest }}
+          EDGE_IMAGE: ${{ needs.validate.outputs.edge_image }}
+          SERVER_DIGEST: ${{ needs.publish-server.outputs.digest }}
+          SERVER_IMAGE: ${{ needs.validate.outputs.server_image }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          VISUALIZER_DIGEST: ${{ needs.publish-visualizer.outputs.digest }}
+          VISUALIZER_IMAGE: ${{ needs.validate.outputs.visualizer_image }}
         run: |
           mkdir -p dist
           printf '%s@%s\n%s@%s\n%s@%s\n' \
@@ -153,12 +291,23 @@ jobs:
             "$VISUALIZER_IMAGE" "$VISUALIZER_DIGEST" \
             "$EDGE_IMAGE" "$EDGE_DIGEST" \
             > dist/oci-images.txt
-          grep -Eq '^ghcr\.io/.+@sha256:[0-9a-f]{64}$' dist/oci-images.txt
+          test "$(grep -Ec '^ghcr\.io/.+@sha256:[0-9a-f]{64}$' dist/oci-images.txt)" -eq 3
           test "$(wc -l < dist/oci-images.txt)" -eq 3
+
+          archive="dist/scrap-monitoring-simulator-deploy-$VERSION.tar.gz"
+          tar --create --gzip --file "$archive" deploy
+          find deploy -type f -print | sort > dist/deploy-files.expected
+          tar --list --gzip --file "$archive" \
+            | grep -Ev '/$' \
+            | sort \
+            > dist/deploy-files.actual
+          diff --unified dist/deploy-files.expected dist/deploy-files.actual
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          files: dist/oci-images.txt
+          files: |
+            dist/oci-images.txt
+            dist/scrap-monitoring-simulator-deploy-${{ needs.validate.outputs.version }}.tar.gz
           fail_on_unmatched_files: true
           generate_release_notes: true

@@ -68,9 +68,9 @@ def install_camera_routes(
 
     @app.get(CAMERA_STATUS_PATH)
     async def camera_status() -> JSONResponse:
-        return JSONResponse(
-            dict(status_provider()), headers={"Cache-Control": "no-store"}
-        )
+        payload = dict(status_provider())
+        payload["camera_stream_delivery"] = "revision-only"
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     @app.websocket(CAMERA_STREAM_PATH)
     async def camera_stream(websocket: WebSocket) -> None:
@@ -99,30 +99,33 @@ def install_camera_routes(
             )
             client_end = asyncio.create_task(_wait_for_client_end(websocket))
             try:
-                interval_s = 1.0 / fps
+                poll_interval_s = min(0.01, 1.0 / (fps * 2))
                 clock = asyncio.get_running_loop()
-                next_send_at = clock.time()
+                next_poll_at = clock.time()
                 sent_frame = False
+                sent_revision: int | None = None
                 try:
                     while True:
                         snapshot = store.get()
-                        if snapshot is not None:
+                        if snapshot is not None and snapshot.revision != sent_revision:
                             async with asyncio.timeout(1.0):
                                 await websocket.send_bytes(snapshot.jpeg)
                             sent_frame = True
+                            sent_revision = snapshot.revision
                         elif sent_frame:
-                            await websocket.close(
-                                code=1012,
-                                reason="camera source unavailable",
-                            )
-                            return
-                        next_send_at += interval_s
+                            if snapshot is None:
+                                await websocket.close(
+                                    code=1012,
+                                    reason="camera source unavailable",
+                                )
+                                return
+                        next_poll_at += poll_interval_s
                         now = clock.time()
-                        if next_send_at < now - interval_s:
-                            next_send_at = now
+                        if next_poll_at < now - poll_interval_s:
+                            next_poll_at = now
                         completed, _ = await asyncio.wait(
                             (client_end,),
-                            timeout=max(0.0, next_send_at - now),
+                            timeout=max(0.0, next_poll_at - now),
                         )
                         if completed:
                             close_request = client_end.result()

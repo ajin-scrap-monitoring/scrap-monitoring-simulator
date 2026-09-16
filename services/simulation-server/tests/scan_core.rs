@@ -3,12 +3,12 @@ use scrap_monitoring_simulation_server::{
     geometry::{Polygon2, Triangle, Vec2, Vec3},
     measurement::{
         CollectionOcclusionEvent, EnvironmentScene, FallingMaterialEvent, HitKind,
-        ReferenceScanner, ScheduledScan, SensorFrame, SnapshotEventCoordinator,
-        SpatialDistortionResolver, TimedReferenceScan, VoidEvent,
+        ReferenceScanner, ScheduledScan, SensorFrame, SensorRotationScheduler,
+        SnapshotEventCoordinator, SpatialDistortionResolver, TimedReferenceScan, VoidEvent,
         resolve_collection_occlusion_distances, resolve_falling_material_distances,
         resolve_void_distances,
     },
-    scenario::HeightField,
+    scenario::{HeightField, build_scenario_simulator},
 };
 use serde_json::Value;
 
@@ -693,6 +693,55 @@ fn a_scan_crossing_an_event_uses_old_then_new_surface_without_interpolation() {
     assert_eq!(result.scan().points()[0].distance_m, 2.0);
     assert_eq!(result.scan().points()[1].hit_kind, Some(HitKind::Surface));
     assert!(result.scan().points()[1].distance_m < 2.0);
+}
+
+#[test]
+fn a_scan_starting_on_the_public_surface_boundary_uses_the_new_snapshot() {
+    let public_inputs = inputs();
+    let surface_event_s = build_scenario_simulator(&public_inputs)
+        .unwrap()
+        .next_surface_event_elapsed_s()
+        .unwrap();
+    let mut scheduler = SensorRotationScheduler::new("sensor", 10.0, 10.0, 0.0).unwrap();
+    let first_schedule = scheduler.next_scan().unwrap();
+    let second_schedule = scheduler.next_scan().unwrap();
+    assert_eq!(
+        second_schedule.captured_elapsed_s().to_bits(),
+        surface_event_s.to_bits()
+    );
+
+    let boundary = Polygon2::new(vec![
+        Vec2::new(-1.0, -1.0).unwrap(),
+        Vec2::new(1.0, -1.0).unwrap(),
+        Vec2::new(1.0, 1.0).unwrap(),
+        Vec2::new(-1.0, 1.0).unwrap(),
+    ])
+    .unwrap();
+    let scene = EnvironmentScene::new(boundary.clone(), 0.0, 3.0, Vec::new()).unwrap();
+    let mut surface = HeightField::new(boundary, 0.0, 3.0, 0.25).unwrap();
+    let mut snapshots = SnapshotEventCoordinator::new(surface.surface_snapshot().unwrap());
+    surface
+        .add_volume(0.2, Vec2::new(0.0, 0.0).unwrap(), 0.5)
+        .unwrap();
+    snapshots
+        .push_event(surface_event_s, surface.surface_snapshot().unwrap())
+        .unwrap();
+    let frame = SensorFrame::new(
+        Vec3::new(0.0, 0.0, 2.0).unwrap(),
+        Vec3::new(0.0, 0.0, -1.0).unwrap(),
+        Vec3::new(1.0, 0.0, 0.0).unwrap(),
+    )
+    .unwrap();
+    let mut scanner = ReferenceScanner::new("sensor", frame, 0.05, 30.0).unwrap();
+
+    let first = scanner
+        .generate_with_snapshots(&scene, &snapshots, first_schedule)
+        .unwrap();
+    let second = scanner
+        .generate_with_snapshots(&scene, &snapshots, second_schedule)
+        .unwrap();
+    assert_eq!(first.scan().points()[0].hit_kind, Some(HitKind::Floor));
+    assert_eq!(second.scan().points()[0].hit_kind, Some(HitKind::Surface));
 }
 
 #[test]

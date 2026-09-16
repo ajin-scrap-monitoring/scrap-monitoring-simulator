@@ -20,6 +20,7 @@
 | `SCRAP_SIMULATOR_SCENE_HOST` | `visualizer` | Scene stream 수신 host |
 | `SCRAP_SIMULATOR_SCENE_PORT` | `17000` | Scene stream TCP port |
 | `SCRAP_SIMULATOR_SCENE_INTERVAL_S` | `1.0` | Scene snapshot 간격 |
+| `SCRAP_SIMULATOR_MEAN_FILL_DURATION_S` | `600` | 평균 적재 주기 override |
 
 `check` command는 설정과 참조 파일을 읽고 sensor identifier 대응을 검증한다.
 
@@ -27,9 +28,10 @@
 
 | 설정 | 기본값 | 책임 |
 | --- | --- | --- |
+| `mean_fill_duration_s` | `600` | 빠른 추세 확인을 위한 평균 적재 주기 |
 | `cell_size_m` | `0.25` | Canonical height field 격자 간격 |
-| `update_interval_s` | `0.5` | 적재면 갱신 간격 |
-| `pile_spread_radius_m` | `1.0` | 투입량을 넓게 분산하는 Gaussian profile 반경 |
+| `update_interval_s` | `0.1` | LiDAR scan 경계와 맞춘 적재면 갱신 간격 |
+| `pile_spread_radius_m` | `0.9` | 완만한 종형을 유지하는 Gaussian profile 반경 |
 | `roughness_height_range_m` | `[-0.45, 0.45]` | 체적을 보존하는 국소 요철 높이 범위 |
 | `roughness_radius_range_m` | `[0.3, 0.65]` | 평균 0.3 m급 스크랩을 표현하는 국소 요철 반경 범위 |
 
@@ -47,11 +49,39 @@ Visualizer의 `live` command는 TCP scene receiver와 HTTP server를 함께 실�
 | `SCRAP_MONITORING_VISUALIZER_CAMERA_PROFILE` | Package 기본 profile | Camera profile 경로 |
 | `SCRAP_MONITORING_VISUALIZER_CAMERA_BACKEND` | `osmesa` | `auto`, `osmesa` 또는 `egl` renderer |
 
-Package 기본 profile은 1920 x 1080, 30 FPS MJPEG와 최대 JPEG 4,194,304 byte를 정의한다.
-Camera가 활성화되면 profile의 배경, 바닥, 벽과 적재물 색을 Browser 3D 모델에도 적용한다.
-Browser 3D 모델은 높이별 colormap을 사용하지 않는다. 투입 지점 표식은 적재면 교차점까지
-수직선으로 연결한다. Browser 페이지는 두 장면의 공통 scene 수치를 영상 아래에 표시하고
-runtime 상태는 표시하지 않는다.
+Camera profile v1의 외부 출력은 1920 x 1080, 30 FPS MJPEG로 고정한다. Package 기본 profile의
+최대 JPEG 크기는 4,194,304 byte이며 `video.raster_width`와 `video.raster_height`의 기본값은
+640과 360이다. CPU camera renderer는
+이 크기의 RGB raster를 만들고 재사용하는 VTK linear scaler로 output 크기까지 확장한 뒤
+Pillow로 JPEG를 한 번 encoding한다. Camera가 활성화되면 profile의 배경, 바닥, 벽과 적재물
+색을 Browser 3D 모델에도 적용한다.
+
+기본 camera machine 설정은 다음과 같다.
+
+| 설정 | 기본값 | 책임 |
+| --- | --- | --- |
+| `conveyor_width_m` | `1.0` | 고정 conveyor 전체 폭 |
+| `outlet_width_m` | `0.9` | Chute 끝단 폭 |
+| `conveyor_length_m` | `2.0` | Pivot 상류의 고정 conveyor 길이 |
+| `conveyor_center_above_wall_m` | `1.25` | 외벽 상단 기준 machine 중심 높이 |
+| `conveyor_body_height_m` | `0.24` | 고정 conveyor 전체 단면 높이 |
+| `duct_height_m` | `0.52` | 회전 chute 단면 높이 |
+| `tip_fraction` | `0.75` | 끝단 하강이 시작되는 길이 비율 |
+| `tip_drop_m` | `0.08` | Chute 끝단 하강 높이 |
+
+Browser 3D 모델은 높이 colormap을 사용하지 않는다. 투입 지점 표식은 적재면 교차점까지
+수직선으로 연결한다. Browser 페이지는 두 장면의 공통 scene 수치를 영상 아래에 표시하며
+runtime status와 camera diagnostics는 표시하지 않는다.
+
+Root `/status`의 synthetic camera 항목은 `camera_source_fps`,
+`camera_source_fps_window_s`, `camera_last_render_ms`, `camera_frames_rendered`와
+`camera_pending_replaced`를 포함한다. `/camera/v1/status`는 같은 source 상태와
+`camera_stream_delivery: revision-only`를 반환한다.
+
+Browser는 수신, decode와 presentation 진단을 화면에 표시하지 않는다. Browser console의
+`window.__scrapCameraMetrics.snapshot()`은 root의 `sampled_at_ms` monotonic timestamp와
+`source`, `network`, `browser` 및 `queues`를 구분한 현재 snapshot을 반환한다. 진단값은
+runtime 조정 입력이 아니다.
 
 ## Camera edge bridge
 
@@ -67,3 +97,9 @@ Camera edge bridge는 다음 환경 변수만 읽는다.
 | `SCRAP_SYNTHETIC_CAMERA_RECONNECT_MAX_MS` | `30000` | 최대 reconnect delay |
 
 URL은 credential과 query가 없는 `ws` scheme, 명시적 port와 고정 stream path를 사용한다.
+
+## 환경 파일과 자격 증명
+
+`deploy/server/.env.example`과 `deploy/edge/.env.example`은 공개 가능한 image digest, endpoint,
+device와 timeout 설정만 관리한다. 실제 실행값은 Git에서 제외한 `.env`에 둔다. 현재 세
+service가 읽는 runtime credential은 0개이며 Compose도 Docker secret을 선언하지 않는다.

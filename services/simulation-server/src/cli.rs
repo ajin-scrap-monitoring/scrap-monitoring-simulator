@@ -48,6 +48,8 @@ enum Command {
         scene_port: u16,
         #[arg(long, env = "SCRAP_SIMULATOR_SCENE_INTERVAL_S", default_value_t = 1.0)]
         scene_interval_s: f64,
+        #[arg(long, env = "SCRAP_SIMULATOR_MEAN_FILL_DURATION_S")]
+        mean_fill_duration_s: Option<f64>,
     },
 }
 
@@ -75,6 +77,7 @@ pub async fn execute() -> Result<(), String> {
             scene_host,
             scene_port,
             scene_interval_s,
+            mean_fill_duration_s,
         } => {
             let summary = crate::runtime::run(RuntimeSettings {
                 config_path: config,
@@ -83,6 +86,7 @@ pub async fn execute() -> Result<(), String> {
                 scene_host,
                 scene_port,
                 scene_interval_s,
+                mean_fill_duration_s,
             })
             .await
             .map_err(|error| error.to_string())?;
@@ -103,5 +107,24 @@ mod tests {
     #[test]
     fn command_definition_is_consistent() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn run_accepts_mean_fill_duration_override() {
+        let cli = Cli::try_parse_from([
+            "scrap-monitoring-simulation-server",
+            "run",
+            "--mean-fill-duration-s",
+            "600",
+        ])
+        .unwrap();
+        let Command::Run {
+            mean_fill_duration_s,
+            ..
+        } = cli.command
+        else {
+            panic!("expected run command");
+        };
+        assert_eq!(mean_fill_duration_s, Some(600.0));
     }
 }

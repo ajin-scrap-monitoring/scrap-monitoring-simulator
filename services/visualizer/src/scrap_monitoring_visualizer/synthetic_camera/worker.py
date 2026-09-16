@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import time
 from dataclasses import dataclass
 from queue import Empty, Full
 from typing import Any
@@ -29,6 +30,7 @@ class CameraRenderOutcome:
     reason: str | None
     jpeg: bytes | None
     render_backend: str | None
+    render_seconds: float
     error: str | None
 
 
@@ -38,11 +40,13 @@ def _render(
     request: CameraRenderRequest,
 ) -> CameraRenderOutcome:
     frame = request.frame.frame
+    started_at = time.perf_counter()
     try:
         rendered = renderer.render(
             request.header,
             frame,
             request.config,
+            interpolation=request.frame,
         )
         return CameraRenderOutcome(
             generation=generation,
@@ -52,6 +56,7 @@ def _render(
             reason=request.frame.reason,
             jpeg=rendered.jpeg,
             render_backend=rendered.render_backend,
+            render_seconds=time.perf_counter() - started_at,
             error=None,
         )
     except Exception as error:
@@ -63,6 +68,7 @@ def _render(
             reason=request.frame.reason,
             jpeg=None,
             render_backend=None,
+            render_seconds=time.perf_counter() - started_at,
             error=str(error),
         )
 

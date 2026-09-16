@@ -12,6 +12,7 @@ from scrap_monitoring_visualizer.contracts import (
 )
 from scrap_monitoring_visualizer.geometry import (
     build_scene_geometry,
+    build_scene_geometry_topology,
     surface_height_at,
 )
 
@@ -219,3 +220,39 @@ def test_each_frame_rebuilds_the_complete_surface(
     geometry = build_scene_geometry(header, replace(frame, surface=replacement))
 
     assert {vertex[2] for vertex in geometry.surface.vertices} == {0.5}
+
+
+def test_cached_topology_updates_heights_without_reclipping(
+    records: tuple[SceneDefinition, SceneFrame],
+) -> None:
+    header, frame = records
+    topology = build_scene_geometry_topology(header, frame)
+    updated = replace(
+        frame,
+        surface=replace(
+            frame.surface,
+            heights_m=((0.2, 0.4), (0.6, 0.8)),
+        ),
+    )
+
+    cached = topology.materialize(updated)
+    rebuilt = build_scene_geometry(header, updated)
+
+    assert cached.surface == rebuilt.surface
+    assert cached.floor == rebuilt.floor
+    assert cached.walls == rebuilt.walls
+    assert len(cached.volume_sides.faces) == 8
+
+
+def test_cached_topology_rejects_grid_changes(
+    records: tuple[SceneDefinition, SceneFrame],
+) -> None:
+    header, frame = records
+    topology = build_scene_geometry_topology(header, frame)
+    changed = replace(
+        frame,
+        surface=replace(frame.surface, cell_size_m=0.5),
+    )
+
+    with pytest.raises(ValueError, match="grid"):
+        topology.materialize(changed)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
@@ -51,6 +52,8 @@ class _ScheduledSegment:
 
 
 class SyntheticCameraPipeline:
+    _RATE_WINDOW_S = 5.0
+
     def __init__(
         self,
         config: SyntheticCameraConfig,
@@ -74,6 +77,8 @@ class SyntheticCameraPipeline:
         self._next_frame_index = 0
         self._submitted_frames = 0
         self._rendered_frames = 0
+        self._rendered_at: deque[float] = deque()
+        self._last_render_seconds: float | None = None
         self._last_mode: str | None = None
         self._last_reason: str | None = None
         self._last_error: str | None = None
@@ -96,6 +101,8 @@ class SyntheticCameraPipeline:
         self._last_mode = None
         self._last_reason = None
         self._last_error = None
+        self._rendered_at.clear()
+        self._last_render_seconds = None
 
     def _submit(self, header: SceneDefinition, frame: InterpolatedFrame) -> None:
         self._worker.submit(
@@ -104,6 +111,48 @@ class SyntheticCameraPipeline:
         self._submitted_frames += 1
         self._last_mode = frame.mode
         self._last_reason = frame.reason
+
+    def _submit_due(self, current_time: float) -> None:
+        segment = self._segment
+        if segment is None:
+            return
+        wall_elapsed_s = max(0.0, current_time - segment.started_at)
+        due_index = self._next_frame_index
+        while due_index < len(segment.targets):
+            target = segment.targets[due_index]
+            due_after_s = target.elapsed_s - segment.origin_elapsed_s
+            if due_after_s > wall_elapsed_s + 1e-12:
+                break
+            due_index += 1
+        if due_index > self._next_frame_index:
+            self._submit(
+                segment.header,
+                materialize_target(
+                    segment.left,
+                    segment.right,
+                    segment.targets[due_index - 1],
+                    timing=self.config.timing,
+                ),
+            )
+            self._next_frame_index = due_index
+        if self._next_frame_index >= len(segment.targets):
+            self._segment = None
+
+    def _submit_segment_end(self) -> None:
+        segment = self._segment
+        if segment is None or self._next_frame_index >= len(segment.targets):
+            return
+        self._submit(
+            segment.header,
+            materialize_target(
+                segment.left,
+                segment.right,
+                segment.targets[-1],
+                timing=self.config.timing,
+            ),
+        )
+        self._next_frame_index = len(segment.targets)
+        self._segment = None
 
     def state_changed(self, state: ExecutionState) -> None:
         if self._closed:
@@ -127,6 +176,8 @@ class SyntheticCameraPipeline:
         if previous is None:
             self._submit(header, exact_frame(frame))
         else:
+            self._submit_due(self._clock())
+            self._submit_segment_end()
             targets = schedule_segment(
                 previous,
                 frame,
@@ -157,7 +208,7 @@ class SyntheticCameraPipeline:
                 self._next_frame_index = 0
         self._last_frame = frame
 
-    def _publish(self, outcome: CameraRenderOutcome) -> None:
+    def _publish(self, outcome: CameraRenderOutcome, published_at: float) -> None:
         if outcome.error is not None or outcome.jpeg is None:
             self._last_error = outcome.error or "camera renderer returned no frame"
             self.store.clear()
@@ -169,6 +220,10 @@ class SyntheticCameraPipeline:
             render_backend=outcome.render_backend or "unknown",
         )
         self._rendered_frames += 1
+        self._rendered_at.append(published_at)
+        while self._rendered_at[0] < published_at - self._RATE_WINDOW_S:
+            self._rendered_at.popleft()
+        self._last_render_seconds = outcome.render_seconds
         self._last_mode = outcome.mode
         self._last_reason = outcome.reason
         self._last_error = None
@@ -176,35 +231,13 @@ class SyntheticCameraPipeline:
     def poll(self, now: float | None = None) -> CameraRenderOutcome | None:
         if self._closed:
             return None
+        current_time = self._clock() if now is None else now
         outcome = self._worker.poll()
         if outcome is not None:
-            self._publish(outcome)
+            self._publish(outcome, current_time)
         if self._started and not self._worker.is_alive:
             raise RuntimeError("synthetic camera renderer process exited")
-        segment = self._segment
-        current_time = self._clock() if now is None else now
-        if segment is not None:
-            wall_elapsed_s = max(0.0, current_time - segment.started_at)
-            due_index = self._next_frame_index
-            while due_index < len(segment.targets):
-                target = segment.targets[due_index]
-                due_after_s = target.elapsed_s - segment.origin_elapsed_s
-                if due_after_s > wall_elapsed_s + 1e-12:
-                    break
-                due_index += 1
-            if due_index > self._next_frame_index:
-                self._submit(
-                    segment.header,
-                    materialize_target(
-                        segment.left,
-                        segment.right,
-                        segment.targets[due_index - 1],
-                        timing=self.config.timing,
-                    ),
-                )
-                self._next_frame_index = due_index
-            if self._next_frame_index >= len(segment.targets):
-                self._segment = None
+        self._submit_due(current_time)
         return outcome
 
     async def run(
@@ -225,6 +258,17 @@ class SyntheticCameraPipeline:
 
     def status(self) -> Mapping[str, object]:
         snapshot = self.store.get()
+        now = self._clock()
+        recent_renders = tuple(
+            rendered_at
+            for rendered_at in self._rendered_at
+            if rendered_at >= now - self._RATE_WINDOW_S
+        )
+        source_fps = (
+            (len(recent_renders) - 1) / (now - recent_renders[0])
+            if len(recent_renders) >= 2 and now > recent_renders[0]
+            else 0.0
+        )
         return {
             "camera_enabled": True,
             "camera_width": self.config.video.width,
@@ -247,6 +291,13 @@ class SyntheticCameraPipeline:
             "camera_interpolation_reason": self._last_reason,
             "camera_frames_submitted": self._submitted_frames,
             "camera_frames_rendered": self._rendered_frames,
+            "camera_source_fps": round(source_fps, 3),
+            "camera_source_fps_window_s": self._RATE_WINDOW_S,
+            "camera_last_render_ms": (
+                round(self._last_render_seconds * 1_000.0, 3)
+                if self._last_render_seconds is not None
+                else None
+            ),
             "camera_pending_replaced": self._worker.replaced_pending,
             "camera_worker_alive": self._worker.is_alive if self._started else False,
             "camera_render_error": self._last_error or self._worker.last_error,

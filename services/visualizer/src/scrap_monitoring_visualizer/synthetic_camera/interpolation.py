@@ -87,6 +87,8 @@ def interpolate_frames(
             right_sequence=right.sequence,
             alpha=0.0,
             mode="exact",
+            left_inlet_index=left.scenario.current_inlet_index,
+            right_inlet_index=right.scenario.current_inlet_index,
         )
     if math.isclose(alpha, 1.0, rel_tol=0.0, abs_tol=1e-12):
         return InterpolatedFrame(
@@ -95,6 +97,8 @@ def interpolate_frames(
             right_sequence=right.sequence,
             alpha=1.0,
             mode="exact",
+            left_inlet_index=left.scenario.current_inlet_index,
+            right_inlet_index=right.scenario.current_inlet_index,
         )
 
     heights = tuple(
@@ -144,6 +148,8 @@ def interpolate_frames(
         right_sequence=right.sequence,
         alpha=alpha,
         mode="interpolated",
+        left_inlet_index=left.scenario.current_inlet_index,
+        right_inlet_index=right.scenario.current_inlet_index,
     )
 
 
@@ -154,4 +160,6 @@ def exact_frame(frame: SceneFrame) -> InterpolatedFrame:
         right_sequence=frame.sequence,
         alpha=1.0,
         mode="exact",
+        left_inlet_index=frame.scenario.current_inlet_index,
+        right_inlet_index=frame.scenario.current_inlet_index,
     )

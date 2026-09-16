@@ -5,20 +5,29 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Protocol
+from typing import Protocol, cast
 
 import numpy as np
 import pyvista as pv
+import vtk
 from PIL import Image
+from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
 from scrap_monitoring_visualizer.contracts.models import SceneDefinition, SceneFrame
 from scrap_monitoring_visualizer.geometry import (
     Mesh,
     SceneGeometry,
-    build_scene_geometry,
+    SceneGeometryTopology,
+    build_scene_geometry_topology,
 )
 
-from .models import MaterialConfig, RenderedCameraFrame, SyntheticCameraConfig
+from .models import (
+    InterpolatedFrame,
+    MachineConfig,
+    MaterialConfig,
+    RenderedCameraFrame,
+    SyntheticCameraConfig,
+)
 
 
 class SyntheticRenderer(Protocol):
@@ -27,6 +36,8 @@ class SyntheticRenderer(Protocol):
         header: SceneDefinition,
         frame: SceneFrame,
         config: SyntheticCameraConfig,
+        *,
+        interpolation: InterpolatedFrame | None = None,
     ) -> RenderedCameraFrame: ...
 
     def close(self) -> None: ...
@@ -37,6 +48,59 @@ class CameraPlacement:
     position: tuple[float, float, float]
     target: tuple[float, float, float]
     view_up: tuple[float, float, float]
+
+
+@dataclass(frozen=True, slots=True)
+class ChutePose:
+    pivot_xy_m: tuple[float, float]
+    outlet_xy_m: tuple[float, float]
+    polar_angle_rad: float
+
+
+_GEOMETRY_EPSILON = 1e-9
+_MAX_CHUTE_TIP_ANGLE_RAD = math.radians(20.0)
+_CHUTE_TIP_SEGMENTS = 4
+
+
+class _VtkBilinearScaler:
+    def __init__(
+        self,
+        source_width: int,
+        source_height: int,
+        output_width: int,
+        output_height: int,
+    ) -> None:
+        self._source_width = source_width
+        self._source_height = source_height
+        self._output_width = output_width
+        self._output_height = output_height
+        self._input = vtk.vtkImageData()
+        self._input.SetDimensions(source_width, source_height, 1)
+        interpolator = vtk.vtkImageInterpolator()
+        interpolator.SetInterpolationModeToLinear()
+        self._resize = vtk.vtkImageResize()
+        self._resize.SetInputData(self._input)
+        self._resize.SetResizeMethodToOutputDimensions()
+        self._resize.SetOutputDimensions(output_width, output_height, 1)
+        self._resize.SetInterpolator(interpolator)
+        self._resize.InterpolateOn()
+
+    def resize(self, image: np.ndarray) -> np.ndarray:
+        if image.shape != (self._source_height, self._source_width, 3):
+            raise ValueError("bilinear scaler received an unexpected frame shape")
+        pixels = numpy_to_vtk(
+            np.ascontiguousarray(image).reshape(-1, 3),
+            deep=False,
+        )
+        pixels.SetNumberOfComponents(3)
+        self._input.GetPointData().SetScalars(pixels)
+        self._input.Modified()
+        self._resize.Update()
+        output = vtk_to_numpy(self._resize.GetOutput().GetPointData().GetScalars())
+        return cast(
+            np.ndarray,
+            output.reshape(self._output_height, self._output_width, 3),
+        )
 
 
 def camera_placement(
@@ -161,53 +225,210 @@ def _add_scrap_surface(
     return data
 
 
-def _chute_poly_data(header: SceneDefinition, frame: SceneFrame) -> pv.PolyData:
-    inlet_index = frame.scenario.current_inlet_index
-    if inlet_index is None:
-        inlet_index = 0
-    lower_center_x, lower_center_y = header.scene.inlet_positions_xy_m[inlet_index]
-    upper_center_x = sum(point[0] for point in header.scene.inlet_positions_xy_m) / len(
-        header.scene.inlet_positions_xy_m
-    )
-    upper_center_y = sum(point[1] for point in header.scene.inlet_positions_xy_m) / len(
-        header.scene.inlet_positions_xy_m
-    )
+def _chute_pivot(
+    header: SceneDefinition,
+    machine: MachineConfig,
+) -> tuple[float, float]:
+    inlet_positions = header.scene.inlet_positions_xy_m
     boundary = header.scene.boundary_xy_m
-    planar_scale = max(
-        max(point[0] for point in boundary) - min(point[0] for point in boundary),
-        max(point[1] for point in boundary) - min(point[1] for point in boundary),
-        1.0,
-    )
-    lower_z = header.scene.top_z_m + 0.15 * planar_scale
-    upper_z = header.scene.top_z_m + 0.48 * planar_scale
-    lower_x = 0.13 * planar_scale
-    lower_y = 0.08 * planar_scale
-    upper_x = 0.2 * planar_scale
-    upper_y = 0.14 * planar_scale
-    angle = math.radians(-15.0 * inlet_index)
-    cosine = math.cos(angle)
-    sine = math.sin(angle)
+    first_x, first_y = inlet_positions[0]
 
-    def lower_point(x: float, y: float) -> tuple[float, float, float]:
+    def upstream_pivot() -> tuple[float, float]:
+        highest_y = max(point[1] for point in boundary)
         return (
-            lower_center_x + x * cosine - y * sine,
-            lower_center_y + x * sine + y * cosine,
-            lower_z,
+            first_x,
+            max(highest_y, max(point[1] for point in inlet_positions))
+            + machine.conveyor_width_m,
         )
 
-    points = np.asarray(
-        (
-            lower_point(-lower_x, -lower_y),
-            lower_point(lower_x, -lower_y),
-            lower_point(lower_x, lower_y),
-            lower_point(-lower_x, lower_y),
-            (upper_center_x - upper_x, upper_center_y - upper_y, upper_z),
-            (upper_center_x + upper_x, upper_center_y - upper_y, upper_z),
-            (upper_center_x + upper_x, upper_center_y + upper_y, upper_z),
-            (upper_center_x - upper_x, upper_center_y + upper_y, upper_z),
-        ),
-        dtype=np.float64,
+    if len(inlet_positions) == 1:
+        return upstream_pivot()
+
+    second_x, second_y = inlet_positions[1]
+    delta_x = second_x - first_x
+    delta_y = second_y - first_y
+    if abs(delta_y) <= _GEOMETRY_EPSILON:
+        return upstream_pivot()
+    pivot_y = (delta_x * delta_x + second_y * second_y - first_y * first_y) / (
+        2.0 * delta_y
     )
+    if not math.isfinite(pivot_y) or pivot_y <= max(first_y, second_y):
+        return upstream_pivot()
+    return first_x, pivot_y
+
+
+def _machine_center_z(header: SceneDefinition, machine: MachineConfig) -> float:
+    return header.scene.top_z_m + machine.conveyor_center_above_wall_m
+
+
+def _shortest_polar_delta(
+    source_angle: float,
+    target_angle: float,
+    *,
+    source_index: int,
+    target_index: int,
+) -> float:
+    delta = math.atan2(
+        math.sin(target_angle - source_angle),
+        math.cos(target_angle - source_angle),
+    )
+    if math.isclose(abs(delta), math.pi, rel_tol=0.0, abs_tol=1e-12):
+        return -math.pi if target_index > source_index else math.pi
+    return delta
+
+
+def _smoothstep(alpha: float) -> float:
+    return alpha * alpha * (3.0 - 2.0 * alpha)
+
+
+def _joint_overlap_m(machine: MachineConfig) -> float:
+    return min(
+        machine.conveyor_width_m * 0.12,
+        machine.conveyor_length_m * 0.1,
+    )
+
+
+def _chute_pose(
+    header: SceneDefinition,
+    frame: SceneFrame,
+    machine: MachineConfig,
+    interpolation: InterpolatedFrame | None = None,
+) -> ChutePose:
+    inlet_positions = header.scene.inlet_positions_xy_m
+    default_index = frame.scenario.current_inlet_index
+    if default_index is None:
+        default_index = 0
+    source_index_value: int | None
+    target_index_value: int | None
+    if interpolation is None:
+        source_index_value = default_index
+        target_index_value = default_index
+        alpha = 1.0
+    else:
+        source_index_value = interpolation.left_inlet_index
+        target_index_value = interpolation.right_inlet_index
+        alpha = interpolation.alpha
+    source_index = 0 if source_index_value is None else source_index_value
+    target_index = 0 if target_index_value is None else target_index_value
+    if not math.isfinite(alpha) or not 0.0 <= alpha <= 1.0:
+        raise ValueError("chute interpolation alpha must be between zero and one")
+
+    pivot_x, pivot_y = _chute_pivot(header, machine)
+    source_x, source_y = inlet_positions[source_index]
+    target_x, target_y = inlet_positions[target_index]
+    source_dx = source_x - pivot_x
+    source_dy = source_y - pivot_y
+    target_dx = target_x - pivot_x
+    target_dy = target_y - pivot_y
+    source_angle = math.atan2(source_dy, source_dx)
+    target_angle = math.atan2(target_dy, target_dx)
+    eased_alpha = _smoothstep(alpha)
+    polar_angle = source_angle + eased_alpha * _shortest_polar_delta(
+        source_angle,
+        target_angle,
+        source_index=source_index,
+        target_index=target_index,
+    )
+    source_radius = math.hypot(source_dx, source_dy)
+    target_radius = math.hypot(target_dx, target_dy)
+    radius = source_radius + eased_alpha * (target_radius - source_radius)
+    if radius <= _GEOMETRY_EPSILON:
+        raise ValueError("chute outlet radius must be positive")
+    return ChutePose(
+        pivot_xy_m=(pivot_x, pivot_y),
+        outlet_xy_m=(
+            pivot_x + radius * math.cos(polar_angle),
+            pivot_y + radius * math.sin(polar_angle),
+        ),
+        polar_angle_rad=polar_angle,
+    )
+
+
+def _fixed_conveyor_poly_data(
+    header: SceneDefinition,
+    machine: MachineConfig,
+) -> pv.PolyData:
+    pivot_x, pivot_y = _chute_pivot(header, machine)
+    direction_x, direction_y = 0.0, -1.0
+    lateral_x = -direction_y
+    lateral_y = direction_x
+    half_width = machine.conveyor_width_m / 2.0
+    center_z = _machine_center_z(header, machine)
+    lower_z = center_z - machine.conveyor_body_height_m / 2.0
+    upper_z = center_z + machine.conveyor_body_height_m / 2.0
+    deck_z = center_z
+    rail_thickness = min(
+        machine.conveyor_width_m * 0.06,
+        machine.conveyor_body_height_m / 2.0,
+    )
+    overlap_m = _joint_overlap_m(machine)
+
+    def body_point(
+        longitudinal_m: float,
+        lateral_m: float,
+        z_m: float,
+    ) -> tuple[float, float, float]:
+        return (
+            pivot_x + longitudinal_m * direction_x + lateral_m * lateral_x,
+            pivot_y + longitudinal_m * direction_y + lateral_m * lateral_y,
+            z_m,
+        )
+
+    def box_points(
+        downstream_m: float,
+        upstream_m: float,
+        lateral_min_m: float,
+        lateral_max_m: float,
+        bottom_z_m: float,
+        top_z_m: float,
+    ) -> np.ndarray:
+        return np.asarray(
+            (
+                body_point(downstream_m, lateral_min_m, bottom_z_m),
+                body_point(downstream_m, lateral_max_m, bottom_z_m),
+                body_point(upstream_m, lateral_max_m, bottom_z_m),
+                body_point(upstream_m, lateral_min_m, bottom_z_m),
+                body_point(downstream_m, lateral_min_m, top_z_m),
+                body_point(downstream_m, lateral_max_m, top_z_m),
+                body_point(upstream_m, lateral_max_m, top_z_m),
+                body_point(upstream_m, lateral_min_m, top_z_m),
+            ),
+            dtype=np.float64,
+        )
+
+    base = box_points(
+        overlap_m / 2.0,
+        -machine.conveyor_length_m,
+        -half_width,
+        half_width,
+        lower_z,
+        deck_z,
+    )
+    rail_downstream_m = -overlap_m / 2.0
+    left_rail = box_points(
+        rail_downstream_m,
+        -machine.conveyor_length_m,
+        -half_width,
+        -half_width + rail_thickness,
+        deck_z,
+        upper_z,
+    )
+    right_rail = box_points(
+        rail_downstream_m,
+        -machine.conveyor_length_m,
+        half_width - rail_thickness,
+        half_width,
+        deck_z,
+        upper_z,
+    )
+    points = np.concatenate((base, left_rail, right_rail))
+    faces = np.concatenate(
+        tuple(_closed_hexahedron_faces(8 * index) for index in range(3))
+    )
+    return pv.PolyData(points, faces)
+
+
+def _closed_hexahedron_faces(point_offset: int = 0) -> np.ndarray:
     faces = np.asarray(
         (
             4,
@@ -243,28 +464,139 @@ def _chute_poly_data(header: SceneDefinition, frame: SceneFrame) -> pv.PolyData:
         ),
         dtype=np.int64,
     )
+    indexed_faces = faces.reshape(-1, 5)
+    indexed_faces[:, 1:] += point_offset
+    return indexed_faces.reshape(-1)
+
+
+def _chute_poly_data(
+    header: SceneDefinition,
+    frame: SceneFrame,
+    machine: MachineConfig,
+    interpolation: InterpolatedFrame | None = None,
+) -> pv.PolyData:
+    pose = _chute_pose(header, frame, machine, interpolation)
+    pivot_x, pivot_y = pose.pivot_xy_m
+    radius = math.hypot(
+        pose.outlet_xy_m[0] - pivot_x,
+        pose.outlet_xy_m[1] - pivot_y,
+    )
+    cosine = math.cos(pose.polar_angle_rad)
+    sine = math.sin(pose.polar_angle_rad)
+    center_z = _machine_center_z(header, machine)
+    tip_run = radius * (1.0 - machine.tip_fraction)
+    if math.atan2(machine.tip_drop_m, tip_run) > _MAX_CHUTE_TIP_ANGLE_RAD:
+        raise ValueError("chute tip angle exceeds 20 degrees")
+
+    def world_point(
+        longitudinal_m: float,
+        lateral_m: float,
+        z_m: float,
+    ) -> tuple[float, float, float]:
+        return (
+            pivot_x + longitudinal_m * cosine - lateral_m * sine,
+            pivot_y + longitudinal_m * sine + lateral_m * cosine,
+            z_m,
+        )
+
+    overlap_m = _joint_overlap_m(machine)
+    socket_clearance_m = min(
+        machine.conveyor_width_m * 0.02,
+        machine.conveyor_body_height_m * 0.1,
+    )
+    socket_width_m = machine.conveyor_width_m + 2.0 * socket_clearance_m
+    tip_start_m = radius * machine.tip_fraction
+    stations = [
+        (-overlap_m, center_z, socket_width_m),
+        (0.0, center_z, socket_width_m),
+        (tip_start_m, center_z, machine.conveyor_width_m),
+    ]
+    for tip_index in range(1, _CHUTE_TIP_SEGMENTS + 1):
+        tip_alpha = tip_index / _CHUTE_TIP_SEGMENTS
+        eased_tip_alpha = _smoothstep(tip_alpha)
+        stations.append(
+            (
+                tip_start_m + tip_run * tip_alpha,
+                center_z - machine.tip_drop_m * eased_tip_alpha,
+                machine.conveyor_width_m
+                + (machine.outlet_width_m - machine.conveyor_width_m) * eased_tip_alpha,
+            )
+        )
+    half_height = machine.duct_height_m / 2.0
+    points = np.asarray(
+        [
+            world_point(longitudinal_m, lateral_m, station_z + vertical_m)
+            for longitudinal_m, station_z, width_m in stations
+            for lateral_m, vertical_m in (
+                (-width_m / 2.0, -half_height),
+                (width_m / 2.0, -half_height),
+                (width_m / 2.0, half_height),
+                (-width_m / 2.0, half_height),
+            )
+        ],
+        dtype=np.float64,
+    )
+    faces = np.asarray(
+        [
+            value
+            for ring_index in range(len(stations) - 1)
+            for edge_index in range(4)
+            for value in (
+                4,
+                ring_index * 4 + edge_index,
+                ring_index * 4 + (edge_index + 1) % 4,
+                (ring_index + 1) * 4 + (edge_index + 1) % 4,
+                (ring_index + 1) * 4 + edge_index,
+            )
+        ],
+        dtype=np.int64,
+    )
     return pv.PolyData(points, faces)
 
 
-def _add_chute(
+def _add_machine_mesh(
     plotter: pv.Plotter,
-    header: SceneDefinition,
-    frame: SceneFrame,
+    data: pv.PolyData,
     material: MaterialConfig,
-) -> pv.PolyData:
-    data = _chute_poly_data(header, frame)
+    *,
+    show_edges: bool = True,
+) -> None:
     plotter.add_mesh(
         data,
         color=material.color,
         edge_color=(0.3, 0.31, 0.31),
         line_width=1.0,
         metallic=material.metallic,
+        opacity=1.0,
         pbr=True,
         roughness=material.roughness,
         ambient=0.3,
         smooth_shading=False,
-        show_edges=True,
+        show_edges=show_edges,
     )
+
+
+def _add_fixed_conveyor(
+    plotter: pv.Plotter,
+    header: SceneDefinition,
+    machine: MachineConfig,
+    material: MaterialConfig,
+) -> pv.PolyData:
+    data = _fixed_conveyor_poly_data(header, machine)
+    _add_machine_mesh(plotter, data, material)
+    return data
+
+
+def _add_chute(
+    plotter: pv.Plotter,
+    header: SceneDefinition,
+    frame: SceneFrame,
+    machine: MachineConfig,
+    material: MaterialConfig,
+    interpolation: InterpolatedFrame | None = None,
+) -> pv.PolyData:
+    data = _chute_poly_data(header, frame, machine, interpolation)
+    _add_machine_mesh(plotter, data, material, show_edges=False)
     return data
 
 
@@ -275,6 +607,8 @@ def _apply_effects(
     noise_standard_deviation: float,
     vignette_strength: float,
 ) -> np.ndarray:
+    if noise_standard_deviation == 0.0 and vignette_strength == 0.0:
+        return image
     values = image.astype(np.float32) / 255.0
     height, width = values.shape[:2]
     if vignette_strength > 0.0:
@@ -313,9 +647,13 @@ class VtkPbrRenderer:
         self._plotter: pv.Plotter | None = None
         self._header: SceneDefinition | None = None
         self._config: SyntheticCameraConfig | None = None
+        self._topology: SceneGeometryTopology | None = None
         self._surface_data: pv.PolyData | None = None
         self._volume_data: pv.PolyData | None = None
+        self._fixed_conveyor_data: pv.PolyData | None = None
         self._chute_data: pv.PolyData | None = None
+        self._chute_pose: ChutePose | None = None
+        self._scaler: _VtkBilinearScaler | None = None
 
     def close(self) -> None:
         if self._plotter is not None:
@@ -323,24 +661,34 @@ class VtkPbrRenderer:
         self._plotter = None
         self._header = None
         self._config = None
+        self._topology = None
         self._surface_data = None
         self._volume_data = None
+        self._fixed_conveyor_data = None
         self._chute_data = None
+        self._chute_pose = None
+        self._scaler = None
 
     def _initialize_scene(
         self,
         header: SceneDefinition,
         frame: SceneFrame,
         config: SyntheticCameraConfig,
+        topology: SceneGeometryTopology,
         geometry: SceneGeometry,
+        interpolation: InterpolatedFrame | None,
     ) -> pv.Plotter:
         self.close()
         placement = camera_placement(header, config)
         plotter = pv.Plotter(
             off_screen=True,
-            window_size=[config.video.width, config.video.height],
+            window_size=[config.video.raster_width, config.video.raster_height],
             lighting="none",
         )
+        render_window = plotter.render_window
+        if render_window is None:
+            raise RuntimeError("renderer did not create a render window")
+        render_window.SetMultiSamples(0)
         self._plotter = plotter
         try:
             plotter.set_background(config.background_color)  # type: ignore[arg-type]
@@ -349,7 +697,6 @@ class VtkPbrRenderer:
                 plotter,
                 geometry.walls,
                 config.wall_material,
-                opacity=0.96,
             )
             self._volume_data = _add_pbr_mesh(
                 plotter,
@@ -363,11 +710,19 @@ class VtkPbrRenderer:
                 config.scrap_material,
                 seed=header.seed,
             )
+            self._fixed_conveyor_data = _add_fixed_conveyor(
+                plotter,
+                header,
+                config.machine,
+                config.chute_material,
+            )
             self._chute_data = _add_chute(
                 plotter,
                 header,
                 frame,
+                config.machine,
                 config.chute_material,
+                interpolation,
             )
             for configured_light in config.lights:
                 position = _normalized_point(
@@ -395,38 +750,62 @@ class VtkPbrRenderer:
             )
             plotter.camera.parallel_projection = False
             plotter.camera.view_angle = config.camera.view_angle_deg
+            plotter.reset_camera_clipping_range()
         except Exception:
             self.close()
             raise
         self._header = header
         self._config = config
+        self._topology = topology
+        self._chute_pose = _chute_pose(header, frame, config.machine, interpolation)
+        self._scaler = _VtkBilinearScaler(
+            config.video.raster_width,
+            config.video.raster_height,
+            config.video.width,
+            config.video.height,
+        )
         return plotter
 
     def _update_scene(
         self,
-        header: SceneDefinition,
         frame: SceneFrame,
         geometry: SceneGeometry,
+        interpolation: InterpolatedFrame | None,
     ) -> bool:
+        if self._surface_data is None or self._volume_data is None:
+            return False
+        if self._surface_data.n_points != len(geometry.surface.vertices):
+            return False
+        if self._volume_data.n_points != len(geometry.volume_sides.vertices):
+            return False
+        self._surface_data.points = np.asarray(
+            geometry.surface.vertices,
+            dtype=np.float64,
+        )
+        self._volume_data.points = np.asarray(
+            geometry.volume_sides.vertices,
+            dtype=np.float64,
+        )
+        if self._fixed_conveyor_data is None or self._chute_data is None:
+            return False
+        assert self._header is not None
         assert self._config is not None
-        surface_data = _scrap_poly_data(
-            geometry.surface,
-            self._config.scrap_material,
-            seed=header.seed,
+        chute_pose = _chute_pose(
+            self._header,
+            frame,
+            self._config.machine,
+            interpolation,
         )
-        volume_data = (
-            _poly_data(geometry.volume_sides) if geometry.volume_sides.faces else None
-        )
-        if self._surface_data is None or (self._volume_data is None) != (
-            volume_data is None
-        ):
-            return False
-        self._surface_data.copy_from(surface_data)
-        if self._volume_data is not None and volume_data is not None:
-            self._volume_data.copy_from(volume_data)
-        if self._chute_data is None:
-            return False
-        self._chute_data.copy_from(_chute_poly_data(header, frame))
+        if chute_pose != self._chute_pose:
+            self._chute_data.copy_from(
+                _chute_poly_data(
+                    self._header,
+                    frame,
+                    self._config.machine,
+                    interpolation,
+                )
+            )
+            self._chute_pose = chute_pose
         return True
 
     def render(
@@ -434,20 +813,34 @@ class VtkPbrRenderer:
         header: SceneDefinition,
         frame: SceneFrame,
         config: SyntheticCameraConfig,
+        *,
+        interpolation: InterpolatedFrame | None = None,
     ) -> RenderedCameraFrame:
         config.validate()
-        geometry = build_scene_geometry(header, frame)
         plotter = self._plotter
-        if (
+        topology = self._topology
+        initialize = (
             plotter is None
+            or topology is None
             or self._header != header
             or self._config != config
-            or not self._update_scene(header, frame, geometry)
-        ):
-            plotter = self._initialize_scene(header, frame, config, geometry)
+        )
+        if initialize:
+            topology = build_scene_geometry_topology(header, frame)
+        assert topology is not None
+        geometry = topology.materialize(frame)
+        if initialize or not self._update_scene(frame, geometry, interpolation):
+            plotter = self._initialize_scene(
+                header,
+                frame,
+                config,
+                topology,
+                geometry,
+                interpolation,
+            )
+        assert plotter is not None
         image: np.ndarray | None = None
         render_window = ""
-        plotter.reset_camera_clipping_range()
         if plotter.camera.parallel_projection:
             raise RuntimeError("synthetic camera must use perspective projection")
         plotter.render()
@@ -455,8 +848,8 @@ class VtkPbrRenderer:
         _validate_render_window(config, render_window)
         image = plotter.screenshot(return_img=True)
         if image is None or image.shape[:2] != (
-            config.video.height,
-            config.video.width,
+            config.video.raster_height,
+            config.video.raster_width,
         ):
             raise RuntimeError("renderer returned an unexpected frame shape")
         assert image is not None
@@ -469,8 +862,12 @@ class VtkPbrRenderer:
             noise_standard_deviation=config.effects.noise_standard_deviation,
             vignette_strength=config.effects.vignette_strength,
         )
+        scaler = self._scaler
+        if scaler is None:
+            raise RuntimeError("renderer did not initialize the bilinear scaler")
+        output_image = Image.fromarray(scaler.resize(processed))
         output = BytesIO()
-        Image.fromarray(processed).save(
+        output_image.save(
             output,
             format="JPEG",
             quality=config.video.jpeg_quality,

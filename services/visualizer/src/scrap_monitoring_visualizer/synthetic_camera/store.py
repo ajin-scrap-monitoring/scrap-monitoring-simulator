@@ -40,10 +40,13 @@ class LatestJpegStore:
             raise ValueError("camera frame must be a complete JPEG image")
         if len(jpeg) > self._max_frame_bytes:
             raise ValueError("camera frame exceeds the configured byte limit")
+        payload = bytes(jpeg)
         with self._lock:
+            if self._frame is not None and self._frame.jpeg == payload:
+                return self._frame
             self._revision += 1
             self._frame = JpegSnapshot(
-                jpeg=bytes(jpeg),
+                jpeg=payload,
                 revision=self._revision,
                 sequence=sequence,
                 elapsed_s=elapsed_s,

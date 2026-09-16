@@ -3,9 +3,10 @@ use std::path::Path;
 use scrap_monitoring_simulation_server::{
     MAX_INLET_POSITIONS,
     configuration::{SimulatorInputs, load_simulator_inputs},
+    measurement::SensorRotationScheduler,
     randomness::SIMULATION_MODEL_VERSION,
     scenario::{
-        DEFAULT_ANGLE_OF_REPOSE_DEG, MAX_EVENT_SNAPSHOT_BYTES, MAX_EVENTS_PER_ADVANCE,
+        DEFAULT_ANGLE_OF_REPOSE_DEG, HeightField, MAX_EVENT_SNAPSHOT_BYTES, MAX_EVENTS_PER_ADVANCE,
         ScenarioPhase, ScenarioSettings, build_scenario_simulator,
     },
 };
@@ -28,6 +29,7 @@ fn scripted_inputs() -> SimulatorInputs {
     scenario.collection_threshold_range = [0.6, 0.6];
     scenario.collection_duration_factor_range = [0.2, 0.2];
     scenario.collection_rate_factor_range = [1.0, 1.0];
+    scenario.surface.update_interval_s = 0.5;
     scenario.surface.pile_spread_radius_m = 0.5;
     scenario.surface.roughness_height_range_m = [0.0, 0.0];
     inputs
@@ -43,6 +45,52 @@ fn close(actual: f64, expected: f64, absolute: f64) {
         actual.is_finite() && expected.is_finite() && (actual - expected).abs() <= tolerance,
         "actual={actual:.17e} expected={expected:.17e} tolerance={tolerance:.17e}"
     );
+}
+
+fn radial_material_second_moment_m2(surface: &HeightField, center_xy_m: [f64; 2]) -> f64 {
+    let columns = surface.shape().1;
+    let volume_m3 = surface.volume_m3();
+    assert!(volume_m3 > 0.0);
+    surface
+        .heights_m()
+        .iter()
+        .enumerate()
+        .map(|(index, height_m)| {
+            let dx_m = surface.x_coordinates_m()[index % columns] - center_xy_m[0];
+            let dy_m = surface.y_coordinates_m()[index / columns] - center_xy_m[1];
+            surface.node_area_m2()[index]
+                * (height_m - surface.floor_z_m())
+                * (dx_m * dx_m + dy_m * dy_m)
+        })
+        .sum::<f64>()
+        / volume_m3
+}
+
+fn maximum_neighbor_slope(surface: &HeightField) -> f64 {
+    let (rows, columns) = surface.shape();
+    let heights = surface.heights_m();
+    let weights = surface.node_area_m2();
+    let mut maximum = 0.0_f64;
+    for y in 0..rows {
+        for x in 0..columns {
+            let first = y * columns + x;
+            for (dy, dx) in [(0_isize, 1_isize), (1, 0), (1, 1), (1, -1)] {
+                let Some(ny) = y.checked_add_signed(dy).filter(|ny| *ny < rows) else {
+                    continue;
+                };
+                let Some(nx) = x.checked_add_signed(dx).filter(|nx| *nx < columns) else {
+                    continue;
+                };
+                let second = ny * columns + nx;
+                if weights[first] == 0.0 || weights[second] == 0.0 {
+                    continue;
+                }
+                let distance_m = surface.cell_size_m() * (dx as f64).hypot(dy as f64);
+                maximum = maximum.max((heights[first] - heights[second]).abs() / distance_m);
+            }
+        }
+    }
+    maximum
 }
 
 #[test]
@@ -173,6 +221,8 @@ fn same_model_seed_reproduces_nonflat_surface_and_different_seed_isolated_stream
 fn model_version_one_scenario_has_an_exact_nonflat_vector() {
     assert_eq!(SIMULATION_MODEL_VERSION, 1);
     let mut inputs = public_inputs();
+    inputs.simulator.scenario.mean_fill_duration_s = 86_400.0;
+    inputs.simulator.scenario.surface.update_interval_s = 0.5;
     inputs.simulator.scenario.surface.pile_spread_radius_m = 0.5;
     inputs.simulator.scenario.surface.roughness_height_range_m = [-0.2, 0.2];
     inputs.simulator.scenario.surface.roughness_radius_range_m = [0.1, 0.3];
@@ -220,7 +270,7 @@ fn model_version_one_scenario_has_an_exact_nonflat_vector() {
 #[test]
 fn local_scrap_roughness_remains_after_macro_slope_relaxation() {
     let public_surface = public_inputs().simulator.scenario.surface;
-    assert_eq!(public_surface.pile_spread_radius_m, 1.0);
+    assert_eq!(public_surface.pile_spread_radius_m, 0.9);
     assert_eq!(public_surface.roughness_height_range_m, [-0.45, 0.45]);
     assert_eq!(public_surface.roughness_radius_range_m, [0.3, 0.65]);
     let mut inputs = scripted_inputs();
@@ -250,8 +300,68 @@ fn local_scrap_roughness_remains_after_macro_slope_relaxation() {
 }
 
 #[test]
+fn public_macro_pile_keeps_a_bounded_bell_concentration() {
+    let mut configured_inputs = public_inputs();
+    configured_inputs
+        .simulator
+        .scenario
+        .surface
+        .roughness_height_range_m = [0.0, 0.0];
+    configured_inputs
+        .simulator
+        .scenario
+        .inlet_switch_activation_ratio = 1.0;
+    let inlet = configured_inputs.simulator.scenario.inlet_positions_xy_m[0];
+    let mut broad_inputs = configured_inputs.clone();
+    broad_inputs.simulator.scenario.surface.pile_spread_radius_m = 1.0;
+
+    let mut configured = build_scenario_simulator(&configured_inputs).unwrap();
+    let mut broad = build_scenario_simulator(&broad_inputs).unwrap();
+    configured.advance_to(10.0).unwrap();
+    broad.advance_to(10.0).unwrap();
+
+    close(
+        configured.surface().volume_m3(),
+        broad.surface().volume_m3(),
+        1e-10,
+    );
+    let configured_moment_m2 = radial_material_second_moment_m2(configured.surface(), inlet);
+    let broad_moment_m2 = radial_material_second_moment_m2(broad.surface(), inlet);
+    let concentration_gain = (broad_moment_m2 - configured_moment_m2) / broad_moment_m2;
+    let configured_peak_m = configured
+        .surface()
+        .heights_m()
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let broad_peak_m = broad
+        .surface()
+        .heights_m()
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let peak_gain = (configured_peak_m - broad_peak_m) / broad_peak_m;
+    let configured_maximum_slope = maximum_neighbor_slope(configured.surface());
+    let repose_slope = DEFAULT_ANGLE_OF_REPOSE_DEG.to_radians().tan();
+
+    assert!(
+        (0.12..=0.14).contains(&concentration_gain),
+        "radial concentration gain was {concentration_gain}"
+    );
+    assert!(
+        (0.14..=0.18).contains(&peak_gain),
+        "peak height gain was {peak_gain}"
+    );
+    assert!(
+        configured_maximum_slope <= repose_slope + 1e-10,
+        "macro slope {configured_maximum_slope} exceeded {repose_slope}"
+    );
+}
+
+#[test]
 fn public_environment_and_time_scaling_keep_distinct_owners() {
     let mut inputs = public_inputs();
+    assert_eq!(inputs.simulator.scenario.mean_fill_duration_s, 600.0);
     let simulator = build_scenario_simulator(&inputs).unwrap();
     assert_eq!(simulator.surface().shape(), (23, 17));
     close(simulator.surface().surface_area_m2(), 14.76, 1e-10);
@@ -259,12 +369,35 @@ fn public_environment_and_time_scaling_keep_distinct_owners() {
 
     inputs.simulator.scenario.mean_fill_duration_s = 3_600.0;
     let settings = ScenarioSettings::from_config(&inputs.simulator.scenario).unwrap();
-    assert_eq!(settings.surface_update_interval_s(), 0.5);
+    assert_eq!(settings.surface_update_interval_s(), 0.1);
     assert_eq!(settings.fill_rate_change_duration_s_range(), [12.5, 37.5]);
     assert_eq!(
         settings.collection_rate_change_duration_s_range(),
         [2.5, 7.5]
     );
+}
+
+#[test]
+fn public_surface_updates_share_the_lidar_rotation_boundaries() {
+    let inputs = public_inputs();
+    let mut simulator = build_scenario_simulator(&inputs).unwrap();
+    let mut lidar = SensorRotationScheduler::new("lidar", 10.0, 10.0, 0.0).unwrap();
+
+    for index in 1..=12 {
+        let scan = lidar.next_scan().unwrap();
+        let surface_boundary = simulator.next_surface_event_elapsed_s().unwrap();
+        assert_eq!(
+            surface_boundary.to_bits(),
+            scan.completed_at_s().to_bits(),
+            "boundary {index}"
+        );
+        let advance = simulator.advance_to(scan.completed_at_s()).unwrap();
+        assert_eq!(advance.events.len(), 1);
+        assert_eq!(
+            advance.events[0].elapsed_s.to_bits(),
+            scan.completed_at_s().to_bits()
+        );
+    }
 }
 
 #[test]

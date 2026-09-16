@@ -65,6 +65,8 @@ def test_interpolation_blends_complete_surface_and_continuous_status(
     assert frame.alpha == pytest.approx(0.5)
     assert frame.left_sequence == 1
     assert frame.right_sequence == 2
+    assert frame.left_inlet_index == 0
+    assert frame.right_inlet_index == 0
     assert frame.frame.sequence == 1
     assert tuple(
         height for row in frame.frame.surface.heights_m for height in row
@@ -93,6 +95,25 @@ def test_interpolation_switches_discrete_state_only_at_right_endpoint(
     assert (middle.scenario.cycle_index, middle.scenario.phase) == (0, "filling")
     assert middle.scenario.current_inlet_index == 0
     assert endpoint == right
+
+
+def test_interpolation_preserves_inlet_endpoints_for_renderer(
+    frame: SceneFrame,
+) -> None:
+    right = _right(frame)
+    right = replace(
+        right,
+        scenario=replace(right.scenario, current_inlet_index=1),
+    )
+
+    middle = interpolate_frames(frame, right, 1.5, max_gap_s=2.0)
+    endpoint = interpolate_frames(frame, right, 2.0, max_gap_s=2.0)
+
+    assert middle.frame.scenario.current_inlet_index == 0
+    assert (middle.left_inlet_index, middle.right_inlet_index) == (0, 1)
+    assert middle.alpha == pytest.approx(0.5)
+    assert (endpoint.left_inlet_index, endpoint.right_inlet_index) == (0, 1)
+    assert endpoint.alpha == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize(
@@ -143,7 +164,11 @@ def test_scheduler_emits_thirty_samples_for_one_second(
 def test_scheduler_holds_instead_of_interpolating_a_gap(
     frame: SceneFrame,
 ) -> None:
-    right = replace(_right(frame), sequence=4)
+    right = replace(
+        _right(frame),
+        sequence=4,
+        scenario=replace(_right(frame).scenario, current_inlet_index=1),
+    )
 
     frames = schedule_segment(
         frame,
@@ -155,15 +180,16 @@ def test_scheduler_holds_instead_of_interpolating_a_gap(
     assert len(frames) == 1
     assert frames[0].mode == "hold"
     assert frames[0].reason == "sequence"
-    assert (
-        materialize_target(
-            frame,
-            right,
-            frames[0],
-            timing=TimingConfig(max_interpolation_gap_s=2.0, max_segment_frames=60),
-        ).frame
-        == right
+    materialized = materialize_target(
+        frame,
+        right,
+        frames[0],
+        timing=TimingConfig(max_interpolation_gap_s=2.0, max_segment_frames=60),
     )
+    assert materialized.frame == right
+    assert materialized.alpha == 1.0
+    assert materialized.left_inlet_index == right.scenario.current_inlet_index
+    assert materialized.right_inlet_index == right.scenario.current_inlet_index
 
 
 def test_scheduler_rejects_oversized_segment_before_materializing_targets(

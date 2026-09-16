@@ -12,6 +12,7 @@ from .models import (
     CameraPose,
     ImageEffectsConfig,
     LightConfig,
+    MachineConfig,
     MaterialConfig,
     RenderBackend,
     RgbColor,
@@ -27,6 +28,7 @@ _TOP_LEVEL_KEYS = {
     "video",
     "timing",
     "camera",
+    "machine",
     "background_color",
     "materials",
     "lights",
@@ -34,6 +36,11 @@ _TOP_LEVEL_KEYS = {
 }
 _MAX_PROFILE_BYTES = 65_536
 _MAX_LIGHTS = 8
+_OUTPUT_WIDTH = 1_920
+_OUTPUT_HEIGHT = 1_080
+_OUTPUT_FPS = 30
+_MAX_MACHINE_DIMENSION_M = 20.0
+_MAX_TIP_ANGLE_DEG = 20.0
 
 
 def _reject_constant(value: str) -> Never:
@@ -49,10 +56,16 @@ def _object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _mapping(value: Any, name: str, keys: set[str]) -> dict[str, Any]:
+def _mapping(
+    value: Any,
+    name: str,
+    keys: set[str],
+    optional_keys: set[str] | None = None,
+) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be an object")
-    unexpected = set(value) - keys
+    optional = optional_keys or set()
+    unexpected = set(value) - keys - optional
     missing = keys - set(value)
     if unexpected:
         raise ValueError(f"{name} has unknown fields: {sorted(unexpected)}")
@@ -112,7 +125,14 @@ def _from_document(document: Any) -> SyntheticCameraConfig:
     video = _mapping(
         root["video"],
         "video",
-        {"width", "height", "fps", "jpeg_quality", "max_frame_bytes"},
+        {
+            "width",
+            "height",
+            "fps",
+            "jpeg_quality",
+            "max_frame_bytes",
+        },
+        {"raster_width", "raster_height"},
     )
     timing = _mapping(
         root["timing"],
@@ -123,6 +143,20 @@ def _from_document(document: Any) -> SyntheticCameraConfig:
         root["camera"],
         "camera",
         {"position_normalized", "target_normalized", "view_up", "view_angle_deg"},
+    )
+    machine = _mapping(
+        root["machine"],
+        "machine",
+        {
+            "conveyor_width_m",
+            "outlet_width_m",
+            "conveyor_length_m",
+            "conveyor_center_above_wall_m",
+            "conveyor_body_height_m",
+            "duct_height_m",
+            "tip_fraction",
+            "tip_drop_m",
+        },
     )
     materials = _mapping(
         root["materials"],
@@ -163,6 +197,14 @@ def _from_document(document: Any) -> SyntheticCameraConfig:
         video=VideoConfig(
             width=_integer(video["width"], "video.width"),
             height=_integer(video["height"], "video.height"),
+            raster_width=_integer(
+                video.get("raster_width", video["width"]),
+                "video.raster_width",
+            ),
+            raster_height=_integer(
+                video.get("raster_height", video["height"]),
+                "video.raster_height",
+            ),
             fps=_integer(video["fps"], "video.fps"),
             jpeg_quality=_integer(video["jpeg_quality"], "video.jpeg_quality"),
             max_frame_bytes=_integer(video["max_frame_bytes"], "video.max_frame_bytes"),
@@ -186,6 +228,26 @@ def _from_document(document: Any) -> SyntheticCameraConfig:
             view_up=_vector(camera["view_up"], "camera.view_up"),
             view_angle_deg=_number(camera["view_angle_deg"], "camera.view_angle_deg"),
         ),
+        machine=MachineConfig(
+            conveyor_width_m=_number(
+                machine["conveyor_width_m"], "machine.conveyor_width_m"
+            ),
+            outlet_width_m=_number(machine["outlet_width_m"], "machine.outlet_width_m"),
+            conveyor_length_m=_number(
+                machine["conveyor_length_m"], "machine.conveyor_length_m"
+            ),
+            conveyor_center_above_wall_m=_number(
+                machine["conveyor_center_above_wall_m"],
+                "machine.conveyor_center_above_wall_m",
+            ),
+            conveyor_body_height_m=_number(
+                machine["conveyor_body_height_m"],
+                "machine.conveyor_body_height_m",
+            ),
+            duct_height_m=_number(machine["duct_height_m"], "machine.duct_height_m"),
+            tip_fraction=_number(machine["tip_fraction"], "machine.tip_fraction"),
+            tip_drop_m=_number(machine["tip_drop_m"], "machine.tip_drop_m"),
+        ),
         background_color=_color(root["background_color"], "background_color"),
         floor_material=_material(materials["floor"], "materials.floor"),
         wall_material=_material(materials["wall"], "materials.wall"),
@@ -208,10 +270,22 @@ def _from_document(document: Any) -> SyntheticCameraConfig:
 
 def validate_camera_config(config: SyntheticCameraConfig) -> None:
     video = config.video
+    if (video.width, video.height, video.fps) != (
+        _OUTPUT_WIDTH,
+        _OUTPUT_HEIGHT,
+        _OUTPUT_FPS,
+    ):
+        raise ValueError("video output must be 1920 x 1080 at 30 FPS")
     if video.width <= 0 or video.height <= 0:
         raise ValueError("video dimensions must be positive")
     if video.width > 3_840 or video.height > 2_160:
         raise ValueError("video dimensions exceed the configured limit")
+    if video.raster_width <= 0 or video.raster_height <= 0:
+        raise ValueError("raster dimensions must be positive")
+    if video.raster_width > video.width or video.raster_height > video.height:
+        raise ValueError("raster dimensions must not exceed video dimensions")
+    if video.width * video.raster_height != video.height * video.raster_width:
+        raise ValueError("raster and video dimensions must have the same aspect ratio")
     if video.fps <= 0 or video.fps > 60:
         raise ValueError("video fps must be between 1 and 60")
     if video.jpeg_quality < 1 or video.jpeg_quality > 95:
@@ -251,6 +325,41 @@ def validate_camera_config(config: SyntheticCameraConfig) -> None:
     )
     if math.isclose(abs(alignment), 1.0, rel_tol=0.0, abs_tol=1e-6):
         raise ValueError("camera view_up must not be parallel to the view direction")
+    machine = config.machine
+    dimensions = {
+        "conveyor width": machine.conveyor_width_m,
+        "outlet width": machine.outlet_width_m,
+        "conveyor length": machine.conveyor_length_m,
+        "conveyor center above wall": machine.conveyor_center_above_wall_m,
+        "conveyor body height": machine.conveyor_body_height_m,
+        "duct height": machine.duct_height_m,
+        "tip drop": machine.tip_drop_m,
+    }
+    for name, value in dimensions.items():
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"machine {name} must be positive")
+        if value > _MAX_MACHINE_DIMENSION_M:
+            raise ValueError(
+                f"machine {name} must not exceed {_MAX_MACHINE_DIMENSION_M:g} m"
+            )
+    if machine.outlet_width_m > machine.conveyor_width_m:
+        raise ValueError("machine outlet width must not exceed conveyor width")
+    if machine.conveyor_body_height_m > machine.duct_height_m:
+        raise ValueError("machine conveyor body height must not exceed duct height")
+    required_clearance = machine.duct_height_m / 2.0
+    if machine.conveyor_center_above_wall_m <= required_clearance:
+        raise ValueError("machine must remain above the wall top")
+    if (
+        not math.isfinite(machine.tip_fraction)
+        or not 0.75 <= machine.tip_fraction <= 0.8
+    ):
+        raise ValueError("machine tip fraction must be between 0.75 and 0.8")
+    reference_tip_run = (1.0 - machine.tip_fraction) * machine.conveyor_width_m
+    tip_angle_deg = math.degrees(math.atan2(machine.tip_drop_m, reference_tip_run))
+    if tip_angle_deg > _MAX_TIP_ANGLE_DEG:
+        raise ValueError(
+            f"machine reference tip angle must not exceed {_MAX_TIP_ANGLE_DEG:g} degrees"
+        )
     colors = (
         config.background_color,
         config.floor_material.color,

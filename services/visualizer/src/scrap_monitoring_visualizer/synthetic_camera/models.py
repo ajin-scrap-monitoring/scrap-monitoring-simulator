@@ -17,6 +17,8 @@ type Vector3 = tuple[float, float, float]
 class VideoConfig:
     width: int
     height: int
+    raster_width: int
+    raster_height: int
     fps: int
     jpeg_quality: int
     max_frame_bytes: int
@@ -34,6 +36,18 @@ class CameraPose:
     target_normalized: Vector3
     view_up: Vector3
     view_angle_deg: float
+
+
+@dataclass(frozen=True, slots=True)
+class MachineConfig:
+    conveyor_width_m: float
+    outlet_width_m: float
+    conveyor_length_m: float
+    conveyor_center_above_wall_m: float
+    conveyor_body_height_m: float
+    duct_height_m: float
+    tip_fraction: float
+    tip_drop_m: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +79,7 @@ class SyntheticCameraConfig:
     video: VideoConfig
     timing: TimingConfig
     camera: CameraPose
+    machine: MachineConfig
     background_color: RgbColor
     floor_material: MaterialConfig
     wall_material: MaterialConfig
@@ -92,6 +107,8 @@ class InterpolatedFrame:
     right_sequence: int
     alpha: float
     mode: InterpolationMode
+    left_inlet_index: int | None
+    right_inlet_index: int | None
     reason: str | None = None
 
 
