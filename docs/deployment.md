@@ -48,8 +48,8 @@ SCRAP_SIMULATOR_TEST_SERVER_IMAGE="$SCRAP_SIMULATION_SERVER_IMAGE" \
 
 실제 Browser 수락 검사는 Mac Chrome과 Ubuntu Server의 release Visualizer image 사이에서
 Chrome DevTools Protocol (CDP)로 수행한다. Mac에서 별도 임시 profile을 지정해 Chrome을
-`--remote-debugging-port=9222 --user-data-dir=<temporary-dir>`로 실행하고 다음 SSH 연결을
-유지한다.
+`--remote-debugging-port=9222 --user-data-dir=<temporary-dir>`로 실행한다. Chrome 창은
+최소화하지 않고 전경에 둔 상태로 다음 SSH 연결을 유지한다.
 
 ```bash
 ssh -N \
@@ -75,9 +75,11 @@ docker run --rm --network host --entrypoint python \
 ```
 
 Probe는 Browser가 준비된 뒤 5초간 warmup하고 baseline snapshot을 만든 다음 1초 간격으로
-60회 측정한다. Baseline부터 마지막 snapshot의 `sampled_at_ms`까지 실제 Browser elapsed를
-기준으로 계산한 WebSocket 수신 평균과 Browser presentation 평균이 각각 27 FPS 이상이어야
-한다.
+60회 측정한다. Probe는 새 target에 `Page.bringToFront`를 요청하고 준비 시점, baseline과 각
+표본에서 `document.visibilityState=visible`, `document.hidden=false`,
+`document.hasFocus()=true`인지 검증한다. Baseline부터 마지막 snapshot의 `sampled_at_ms`까지
+실제 Browser elapsed를 기준으로 계산한 WebSocket 수신 평균과 Browser presentation 평균이
+각각 27 FPS 이상이어야 한다.
 
 최소 trailing 5초의 각 안정 창은 source rolling FPS와 WebSocket 수신 및 Browser presentation
 cumulative counter delta가 모두 27 FPS 이상일 때 통과한다. 판정 가능한 안정 창 중 90%

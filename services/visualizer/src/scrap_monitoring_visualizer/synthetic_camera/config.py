@@ -346,7 +346,13 @@ def validate_camera_config(config: SyntheticCameraConfig) -> None:
         raise ValueError("machine outlet width must not exceed conveyor width")
     if machine.conveyor_body_height_m > machine.duct_height_m:
         raise ValueError("machine conveyor body height must not exceed duct height")
-    required_clearance = machine.duct_height_m / 2.0
+    rail_thickness_m = min(
+        machine.conveyor_width_m * 0.06,
+        machine.conveyor_body_height_m / 2.0,
+    )
+    if machine.outlet_width_m <= 2.0 * rail_thickness_m:
+        raise ValueError("machine outlet width must leave space between chute rails")
+    required_clearance = machine.conveyor_body_height_m / 2.0
     if machine.conveyor_center_above_wall_m <= required_clearance:
         raise ValueError("machine must remain above the wall top")
     if (

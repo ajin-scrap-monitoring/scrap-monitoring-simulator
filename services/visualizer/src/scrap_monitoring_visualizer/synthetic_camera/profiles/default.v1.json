@@ -26,7 +26,7 @@
     "conveyor_length_m": 2.0,
     "conveyor_center_above_wall_m": 1.25,
     "conveyor_body_height_m": 0.24,
-    "duct_height_m": 0.52,
+    "duct_height_m": 0.24,
     "tip_fraction": 0.75,
     "tip_drop_m": 0.08
   },

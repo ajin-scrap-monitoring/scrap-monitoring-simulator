@@ -36,6 +36,13 @@ class BrowserProbeResult:
     max_pending_present: int
 
 
+@dataclass(frozen=True, slots=True)
+class BrowserPageState:
+    visibility_state: str
+    hidden: bool
+    has_focus: bool
+
+
 def _http_json(url: str, *, method: str = "GET") -> dict[str, Any]:
     request = urllib.request.Request(url, method=method)
     with urllib.request.urlopen(request, timeout=5.0) as response:
@@ -136,6 +143,68 @@ async def _metrics(websocket: Any, command_id: int) -> dict[str, Any] | None:
     if not isinstance(metrics, dict):
         raise RuntimeError("Browser camera metrics must be an object")
     return cast(dict[str, Any], metrics)
+
+
+async def _prepare_page(websocket: Any) -> int:
+    await _cdp_command(websocket, 1, "Runtime.enable")
+    await _cdp_command(websocket, 2, "Page.bringToFront")
+    return 2
+
+
+async def _page_state(websocket: Any, command_id: int) -> BrowserPageState:
+    result = await _cdp_command(
+        websocket,
+        command_id,
+        "Runtime.evaluate",
+        {
+            "expression": (
+                "JSON.stringify({"
+                "visibilityState:document.visibilityState,"
+                "hidden:document.hidden,"
+                "hasFocus:document.hasFocus()"
+                "})"
+            ),
+            "returnByValue": True,
+        },
+    )
+    remote = result.get("result")
+    if not isinstance(remote, dict):
+        raise RuntimeError("Chrome DevTools page state evaluation returned no value")
+    encoded = remote.get("value")
+    if not isinstance(encoded, str):
+        raise RuntimeError("Browser page state must be JSON text")
+    value: object = json.loads(encoded)
+    if not isinstance(value, dict):
+        raise RuntimeError("Browser page state must be an object")
+    state = cast(dict[str, Any], value)
+    visibility_state = state.get("visibilityState")
+    hidden = state.get("hidden")
+    has_focus = state.get("hasFocus")
+    if not isinstance(visibility_state, str):
+        raise RuntimeError("Browser document.visibilityState must be text")
+    if not isinstance(hidden, bool):
+        raise RuntimeError("Browser document.hidden must be boolean")
+    if not isinstance(has_focus, bool):
+        raise RuntimeError("Browser document.hasFocus() must be boolean")
+    return BrowserPageState(
+        visibility_state=visibility_state,
+        hidden=hidden,
+        has_focus=has_focus,
+    )
+
+
+def _validate_page_state(state: BrowserPageState) -> None:
+    if state.visibility_state == "visible" and not state.hidden and state.has_focus:
+        return
+    details = {
+        "document.hasFocus()": state.has_focus,
+        "document.hidden": state.hidden,
+        "document.visibilityState": state.visibility_state,
+    }
+    raise RuntimeError(
+        "Browser page must remain visible and focused during acceptance measurement: "
+        f"{json.dumps(details, sort_keys=True)}"
+    )
 
 
 def _number(mapping: dict[str, Any], key: str) -> float:
@@ -311,8 +380,9 @@ async def run_probe(
             max_size=1_048_576,
             compression=None,
         ) as websocket:
-            command_id = 1
-            await _cdp_command(websocket, command_id, "Runtime.enable")
+            command_id = await _prepare_page(websocket)
+            command_id += 1
+            _validate_page_state(await _page_state(websocket, command_id))
             deadline = asyncio.get_running_loop().time() + readiness_timeout_s
             while True:
                 command_id += 1
@@ -333,12 +403,16 @@ async def run_probe(
 
             await asyncio.sleep(5.0)
             command_id += 1
+            _validate_page_state(await _page_state(websocket, command_id))
+            command_id += 1
             baseline = await _metrics(websocket, command_id)
             if baseline is None:
                 raise RuntimeError("Browser camera metrics disappeared")
             samples: list[dict[str, Any]] = []
             for _ in range(duration_s):
                 await asyncio.sleep(1.0)
+                command_id += 1
+                _validate_page_state(await _page_state(websocket, command_id))
                 command_id += 1
                 sample = await _metrics(websocket, command_id)
                 if sample is None:
