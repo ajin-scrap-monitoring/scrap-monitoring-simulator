@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "backend": "auto",
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "jpeg_quality": 85,
+    "max_frame_bytes": 4194304
+  },
+  "timing": {
+    "max_interpolation_gap_s": 2.0,
+    "max_segment_frames": 120
+  },
+  "camera": {
+    "position_normalized": [0.0, -0.485, 1.36],
+    "target_normalized": [0.0, 0.125, 0.75],
+    "view_up": [0.0, 0.0, 1.0],
+    "view_angle_deg": 45.0
+  },
+  "background_color": [0.84, 0.85, 0.84],
+  "materials": {
+    "floor": {
+      "color": [0.25, 0.27, 0.28],
+      "metallic": 0.15,
+      "roughness": 0.82
+    },
+    "wall": {
+      "color": [0.52, 0.31, 0.16],
+      "metallic": 0.25,
+      "roughness": 0.72
+    },
+    "scrap": {
+      "color": [0.5, 0.52, 0.54],
+      "metallic": 0.65,
+      "roughness": 0.38
+    },
+    "chute": {
+      "color": [0.88, 0.89, 0.9],
+      "metallic": 0.55,
+      "roughness": 0.42
+    }
+  },
+  "lights": [
+    {
+      "position_normalized": [-0.65, -0.75, 1.8],
+      "color": [1.0, 0.96, 0.88],
+      "intensity": 2.6
+    },
+    {
+      "position_normalized": [0.8, 0.45, 1.25],
+      "color": [0.72, 0.82, 1.0],
+      "intensity": 0.85
+    }
+  ],
+  "effects": {
+    "noise_standard_deviation": 0.0,
+    "vignette_strength": 0.0
+  }
+}

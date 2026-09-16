@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ajin-scrap-monitoring/scrap-monitoring-simulator/contracts/environment/v1/environment.schema.json",
+  "title": "LiDAR environment configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "environment_id",
+    "length_unit",
+    "angle_unit",
+    "boundary_xy_m",
+    "floor_z_m",
+    "top_z_m",
+    "sensors"
+  ],
+  "properties": {
+    "environment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "length_unit": {
+      "const": "m"
+    },
+    "angle_unit": {
+      "const": "deg"
+    },
+    "boundary_xy_m": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/coordinate2"
+      }
+    },
+    "floor_z_m": {
+      "type": "number"
+    },
+    "top_z_m": {
+      "type": "number"
+    },
+    "sensors": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/sensor"
+      }
+    }
+  },
+  "$defs": {
+    "coordinate2": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "items": false
+    },
+    "coordinate3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "items": false
+    },
+    "sensor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sensor_id",
+        "p0_m",
+        "u0",
+        "u90"
+      ],
+      "properties": {
+        "sensor_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "p0_m": {
+          "$ref": "#/$defs/coordinate3"
+        },
+        "u0": {
+          "$ref": "#/$defs/coordinate3"
+        },
+        "u90": {
+          "$ref": "#/$defs/coordinate3"
+        }
+      }
+    }
+  }
+}

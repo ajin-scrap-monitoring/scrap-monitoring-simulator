@@ -1,0 +1,12 @@
+[Unit]
+Description=Configure the Scrap synthetic camera V4L2 device
+After=systemd-modules-load.service
+Before=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/scrap-monitoring/configure-v4l2loopback
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

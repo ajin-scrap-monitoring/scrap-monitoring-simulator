@@ -1,0 +1,347 @@
+{
+  "comparison_class": "rng-independent",
+  "deposited_surface": "height-field-operations.json operations[1]",
+  "event_lifetime": "[started_at_s, ends_at_s)",
+  "sensors": [
+    {
+      "collection": {
+        "distances_m": [
+          4.897843773960138,
+          4.897843773960138,
+          4.397843773960138,
+          4.897843773960138,
+          4.897843773960138
+        ],
+        "events": [
+          {
+            "cycle_index": 0,
+            "distance_reduction_m": 0.5,
+            "end_center": {
+              "x": 1.0,
+              "y": 1.4021596177772604
+            },
+            "ends_at_s": 1.5,
+            "radius_m": 0.25,
+            "start_center": {
+              "x": 0.0,
+              "y": 1.4021596177772604
+            },
+            "started_at_s": 0.5
+          }
+        ]
+      },
+      "dropout": {
+        "active_mask": [
+          false,
+          true,
+          false,
+          true,
+          false
+        ],
+        "duration_s": 0.5,
+        "inactive_gap_s": 0.5
+      },
+      "falling": {
+        "distances_m": [
+          4.897843773960138,
+          4.397843773960138,
+          4.147843773960138,
+          4.897843773960138,
+          4.897843773960138
+        ],
+        "events": [
+          {
+            "center": {
+              "x": 0.5,
+              "y": 1.4021596177772604
+            },
+            "cycle_index": 0,
+            "distance_reduction_m": 0.5,
+            "ends_at_s": 1.5,
+            "radius_m": 0.25,
+            "started_at_s": 0.5
+          },
+          {
+            "center": {
+              "x": 0.5,
+              "y": 1.4021596177772604
+            },
+            "cycle_index": 0,
+            "distance_reduction_m": 0.75,
+            "ends_at_s": 1.5,
+            "radius_m": 0.25,
+            "started_at_s": 1.0
+          }
+        ],
+        "floor_hit_distances_m": [
+          4.897843773960138,
+          4.897843773960138,
+          4.897843773960138,
+          4.897843773960138,
+          4.897843773960138
+        ]
+      },
+      "reference": {
+        "angles_deg": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "completed_at_s": 2.5,
+        "distances_m": [
+          4.897843773960138,
+          4.897843773960138,
+          4.897843773960138,
+          4.897843773960138,
+          4.897843773960138
+        ],
+        "hit_kinds": [
+          "surface",
+          "surface",
+          "surface",
+          "surface",
+          "surface"
+        ],
+        "point_elapsed_times_s": [
+          0.0,
+          0.5,
+          1.0,
+          1.5,
+          2.0
+        ],
+        "rotation_started_at_s": 0.0,
+        "scan_id": 1,
+        "sensor_id": "lidar_1"
+      },
+      "voids": {
+        "blocked_distances_m": [
+          4.897843773960138,
+          4.897843773960138,
+          4.897843773960138,
+          4.897843773960138,
+          4.897843773960138
+        ],
+        "blocked_event": {
+          "center": {
+            "x": 0.5,
+            "y": 1.4021596177772604
+          },
+          "cycle_index": 0,
+          "distance_increase_m": 30.0,
+          "ends_at_s": 1.5,
+          "expires_at_s": 1.5,
+          "radius_m": 0.25,
+          "started_at_s": 0.5,
+          "surface_height_at_start_m": 5.226780946857654
+        },
+        "distances_m": [
+          4.897843773960138,
+          4.997843773960137,
+          4.997843773960137,
+          4.897843773960138,
+          4.897843773960138
+        ],
+        "events": [
+          {
+            "center": {
+              "x": 0.5,
+              "y": 1.4021596177772604
+            },
+            "cycle_index": 0,
+            "distance_increase_m": 0.3,
+            "ends_at_s": 1.5,
+            "expires_at_s": 1.5,
+            "radius_m": 0.25,
+            "started_at_s": 0.5,
+            "surface_height_at_start_m": 5.226780946857654
+          },
+          {
+            "center": {
+              "x": 0.5,
+              "y": 1.4021596177772604
+            },
+            "cycle_index": 0,
+            "distance_increase_m": 0.1,
+            "ends_at_s": 1.5,
+            "expires_at_s": 1.5,
+            "radius_m": 0.25,
+            "started_at_s": 0.5,
+            "surface_height_at_start_m": 5.226780946857654
+          }
+        ]
+      }
+    },
+    {
+      "collection": {
+        "distances_m": [
+          9.29934815806977,
+          9.29934815806977,
+          8.79934815806977,
+          9.29934815806977,
+          9.29934815806977
+        ],
+        "events": [
+          {
+            "cycle_index": 0,
+            "distance_reduction_m": 0.5,
+            "end_center": {
+              "x": 4.1794695177241055,
+              "y": 3.9
+            },
+            "ends_at_s": 1.5,
+            "radius_m": 0.25,
+            "start_center": {
+              "x": 3.1794695177241055,
+              "y": 3.9
+            },
+            "started_at_s": 0.5
+          }
+        ]
+      },
+      "dropout": {
+        "active_mask": [
+          false,
+          true,
+          false,
+          true,
+          false
+        ],
+        "duration_s": 0.5,
+        "inactive_gap_s": 0.5
+      },
+      "falling": {
+        "distances_m": [
+          9.29934815806977,
+          8.79934815806977,
+          8.54934815806977,
+          9.29934815806977,
+          9.29934815806977
+        ],
+        "events": [
+          {
+            "center": {
+              "x": 3.6794695177241055,
+              "y": 3.9
+            },
+            "cycle_index": 0,
+            "distance_reduction_m": 0.5,
+            "ends_at_s": 1.5,
+            "radius_m": 0.25,
+            "started_at_s": 0.5
+          },
+          {
+            "center": {
+              "x": 3.6794695177241055,
+              "y": 3.9
+            },
+            "cycle_index": 0,
+            "distance_reduction_m": 0.75,
+            "ends_at_s": 1.5,
+            "radius_m": 0.25,
+            "started_at_s": 1.0
+          }
+        ],
+        "floor_hit_distances_m": [
+          9.29934815806977,
+          9.29934815806977,
+          9.29934815806977,
+          9.29934815806977,
+          9.29934815806977
+        ]
+      },
+      "reference": {
+        "angles_deg": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "completed_at_s": 2.5,
+        "distances_m": [
+          9.29934815806977,
+          9.29934815806977,
+          9.29934815806977,
+          9.29934815806977,
+          9.29934815806977
+        ],
+        "hit_kinds": [
+          "surface",
+          "surface",
+          "surface",
+          "surface",
+          "surface"
+        ],
+        "point_elapsed_times_s": [
+          0.0,
+          0.5,
+          1.0,
+          1.5,
+          2.0
+        ],
+        "rotation_started_at_s": 0.0,
+        "scan_id": 1,
+        "sensor_id": "lidar_2"
+      },
+      "voids": {
+        "blocked_distances_m": [
+          9.29934815806977,
+          9.29934815806977,
+          9.29934815806977,
+          9.29934815806977,
+          9.29934815806977
+        ],
+        "blocked_event": {
+          "center": {
+            "x": 3.6794695177241055,
+            "y": 3.9
+          },
+          "cycle_index": 0,
+          "distance_increase_m": 30.0,
+          "ends_at_s": 1.5,
+          "expires_at_s": 1.5,
+          "radius_m": 0.25,
+          "started_at_s": 0.5,
+          "surface_height_at_start_m": 0.80353654850596
+        },
+        "distances_m": [
+          9.29934815806977,
+          9.39934815806977,
+          9.39934815806977,
+          9.29934815806977,
+          9.29934815806977
+        ],
+        "events": [
+          {
+            "center": {
+              "x": 3.6794695177241055,
+              "y": 3.9
+            },
+            "cycle_index": 0,
+            "distance_increase_m": 0.3,
+            "ends_at_s": 1.5,
+            "expires_at_s": 1.5,
+            "radius_m": 0.25,
+            "started_at_s": 0.5,
+            "surface_height_at_start_m": 0.80353654850596
+          },
+          {
+            "center": {
+              "x": 3.6794695177241055,
+              "y": 3.9
+            },
+            "cycle_index": 0,
+            "distance_increase_m": 0.1,
+            "ends_at_s": 1.5,
+            "expires_at_s": 1.5,
+            "radius_m": 0.25,
+            "started_at_s": 0.5,
+            "surface_height_at_start_m": 0.80353654850596
+          }
+        ]
+      }
+    }
+  ]
+}

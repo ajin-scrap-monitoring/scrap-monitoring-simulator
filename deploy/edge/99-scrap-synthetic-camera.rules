@@ -1,0 +1,2 @@
+# udev creates a semantic alias without changing the physical camera nodes.
+SUBSYSTEM=="video4linux", KERNEL=="video42", ATTR{name}=="Scrap Synthetic Camera", GROUP="video", MODE="0660", SYMLINK+="scrap-synthetic-camera"

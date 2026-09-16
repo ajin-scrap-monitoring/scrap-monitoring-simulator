@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Third-party notices for Scrap Monitoring Simulation Server</title>
+</head>
+<body>
+  <h1>Third-party notices for Scrap Monitoring Simulation Server</h1>
+  <p>This file lists the license terms for Rust crates linked into the ARM64 binary.</p>
+  <p>Rust toolchain and bundled target library notices are provided separately as RUST_COPYRIGHT.html.</p>
+  {{#each licenses}}
+  <section>
+    <h2>{{name}}</h2>
+    <p>Used by:</p>
+    <ul>
+      {{#each used_by}}
+      <li>{{crate.name}} {{crate.version}}{{#if crate.repository}} (<a href="{{crate.repository}}">source</a>){{/if}}</li>
+      {{/each}}
+    </ul>
+    <pre>{{text}}</pre>
+  </section>
+  {{/each}}
+</body>
+</html>

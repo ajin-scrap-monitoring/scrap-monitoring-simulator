@@ -1,0 +1,27 @@
+{
+  "config_version": 1,
+  "sensors": [
+    {
+      "sensor_id": "lidar_1",
+      "valid_distance_frequencies": {
+        "48": 1,
+        "80": 3
+      },
+      "invalid_distance_frequencies": {
+        "0": 2,
+        "24": 1
+      }
+    },
+    {
+      "sensor_id": "lidar_2",
+      "valid_distance_frequencies": {
+        "48": 1,
+        "80": 3
+      },
+      "invalid_distance_frequencies": {
+        "0": 2,
+        "24": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,966 @@
+{
+  "comparison_class": "rng-independent",
+  "simulator_overrides": {
+    "measurement": {
+      "distance_noise": {
+        "enabled": false
+      },
+      "distortions": {
+        "collection_occlusion": {
+          "enabled": false
+        },
+        "dropout": {
+          "enabled": false
+        },
+        "falling_material": {
+          "enabled": false
+        },
+        "reflection_error": {
+          "enabled": false
+        },
+        "voids": {
+          "enabled": false
+        }
+      },
+      "rotation_rate_hz": 4.0,
+      "sample_rate_hz": 40.0
+    },
+    "scenario": {
+      "collection_duration_factor_range": [
+        0.2,
+        0.2
+      ],
+      "collection_rate_factor_range": [
+        1.0,
+        1.0
+      ],
+      "collection_threshold_range": [
+        0.6,
+        0.6
+      ],
+      "fill_duration_factor_range": [
+        1.0,
+        1.0
+      ],
+      "fill_rate_factor_range": [
+        1.0,
+        1.0
+      ],
+      "mean_fill_duration_s": 4.25,
+      "surface": {
+        "roughness_height_range_m": [
+          0.0,
+          0.0
+        ]
+      }
+    }
+  },
+  "quality_policy": "lowest configured quality byte with positive frequency",
+  "records": [
+    {
+      "frame": null,
+      "protobuf_hex": null,
+      "reference": {
+        "angles_deg": [
+          144.7613525390625,
+          180.7635498046875,
+          216.76025390625,
+          252.762451171875,
+          288.7591552734375,
+          324.7613525390625,
+          0.7635498046875,
+          36.76025390625,
+          72.762451171875,
+          108.7591552734375
+        ],
+        "completed_at_s": 0.25,
+        "distances_m": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          3.696354979579243,
+          6.066032717541501,
+          10.262002783934003,
+          0.8354665762095587,
+          0.5235139622962557,
+          0.0
+        ],
+        "hit_kinds": [
+          null,
+          null,
+          null,
+          null,
+          "wall",
+          "wall",
+          "floor",
+          "wall",
+          "wall",
+          null
+        ],
+        "point_elapsed_times_s": [
+          0.0,
+          0.025,
+          0.05,
+          0.075,
+          0.1,
+          0.125,
+          0.15,
+          0.175,
+          0.2,
+          0.225
+        ],
+        "rotation_started_at_s": 0.0,
+        "scan_id": 1,
+        "sensor_id": "lidar_1"
+      }
+    },
+    {
+      "frame": null,
+      "protobuf_hex": null,
+      "reference": {
+        "angles_deg": [
+          91.9061279296875,
+          127.9083251953125,
+          163.905029296875,
+          199.9072265625,
+          235.9039306640625,
+          271.9061279296875,
+          307.9083251953125,
+          343.905029296875,
+          19.9072265625,
+          55.9039306640625
+        ],
+        "completed_at_s": 0.25,
+        "distances_m": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          5.049952740821661,
+          10.754507795523178,
+          4.709582995749319
+        ],
+        "hit_kinds": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "wall",
+          "floor",
+          "wall"
+        ],
+        "point_elapsed_times_s": [
+          0.0,
+          0.025,
+          0.05,
+          0.075,
+          0.1,
+          0.125,
+          0.15,
+          0.175,
+          0.2,
+          0.225
+        ],
+        "rotation_started_at_s": 0.0,
+        "scan_id": 1,
+        "sensor_id": "lidar_2"
+      }
+    },
+    {
+      "frame": {
+        "acquired_at_unix_ms": 1800000000000,
+        "acquired_monotonic_ns": 1250000000,
+        "config_revision": "parity-v1",
+        "edge_id": "synthetic-edge",
+        "instance_id": "parity-lidar_1",
+        "samples": [
+          {
+            "angle_mdeg": 764,
+            "distance_mm": 10262,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 36760,
+            "distance_mm": 835,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 72762,
+            "distance_mm": 523,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 108759,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 144761,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 180764,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 216760,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 252762,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 288759,
+            "distance_mm": 3696,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 324761,
+            "distance_mm": 6066,
+            "quality": 12
+          }
+        ],
+        "scan_hz": 4.0,
+        "schema_version": "1.0",
+        "sdk_status": "OK",
+        "sensor_id": "lidar_1",
+        "sequence": 1
+      },
+      "protobuf_hex": "0a03312e30120e73796e7468657469632d656467651a076c696461725f3120012880a0f1c2b1343080f985d4043a024f4b4100000000000010404a0808fc05109650180c4a0908989f0210c306180c4a0908bab804108b04180c4a0408d7d1064a0408f9ea084a04089c840b4a0408b89d0d4a0408dab60f4a0908f7cf1110f01c180c4a090899e91310b22f180c520e7061726974792d6c696461725f315a097061726974792d7631",
+      "reference": {
+        "angles_deg": [
+          144.7613525390625,
+          180.7635498046875,
+          216.76025390625,
+          252.762451171875,
+          288.7591552734375,
+          324.7613525390625,
+          0.7635498046875,
+          36.76025390625,
+          72.762451171875,
+          108.7591552734375
+        ],
+        "completed_at_s": 0.5,
+        "distances_m": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          3.696354979579243,
+          6.066032717541501,
+          10.262002783934003,
+          0.8354665762095587,
+          0.5235139622962557,
+          0.0
+        ],
+        "hit_kinds": [
+          null,
+          null,
+          null,
+          null,
+          "wall",
+          "wall",
+          "floor",
+          "wall",
+          "wall",
+          null
+        ],
+        "point_elapsed_times_s": [
+          0.25,
+          0.275,
+          0.3,
+          0.325,
+          0.35,
+          0.375,
+          0.4,
+          0.425,
+          0.45,
+          0.475
+        ],
+        "rotation_started_at_s": 0.25,
+        "scan_id": 2,
+        "sensor_id": "lidar_1"
+      }
+    },
+    {
+      "frame": {
+        "acquired_at_unix_ms": 1800000000000,
+        "acquired_monotonic_ns": 1250000001,
+        "config_revision": "parity-v1",
+        "edge_id": "synthetic-edge",
+        "instance_id": "parity-lidar_2",
+        "samples": [
+          {
+            "angle_mdeg": 19907,
+            "distance_mm": 10754,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 55904,
+            "distance_mm": 4709,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 91906,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 127908,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 163905,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 199907,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 235904,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 271906,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 307908,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 343905,
+            "distance_mm": 5050,
+            "quality": 12
+          }
+        ],
+        "scan_hz": 4.0,
+        "schema_version": "1.0",
+        "sdk_status": "OK",
+        "sensor_id": "lidar_2",
+        "sequence": 1
+      },
+      "protobuf_hex": "0a03312e30120e73796e7468657469632d656467651a076c696461725f3220012880a0f1c2b1343081f985d4043a024f4b4100000000000010404a0908c39b01108254180c4a0908e0b40310e524180c4a040882ce054a0408a4e7074a0408c1800a4a0408e3990c4a040880b30e4a0408a2cc104a0408c4e5124a0908e1fe1410ba27180c520e7061726974792d6c696461725f325a097061726974792d7631",
+      "reference": {
+        "angles_deg": [
+          91.9061279296875,
+          127.9083251953125,
+          163.905029296875,
+          199.9072265625,
+          235.9039306640625,
+          271.9061279296875,
+          307.9083251953125,
+          343.905029296875,
+          19.9072265625,
+          55.9039306640625
+        ],
+        "completed_at_s": 0.5,
+        "distances_m": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          5.049952740821661,
+          10.754507795523178,
+          4.709582995749319
+        ],
+        "hit_kinds": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "wall",
+          "floor",
+          "wall"
+        ],
+        "point_elapsed_times_s": [
+          0.25,
+          0.275,
+          0.3,
+          0.325,
+          0.35,
+          0.375,
+          0.4,
+          0.425,
+          0.45,
+          0.475
+        ],
+        "rotation_started_at_s": 0.25,
+        "scan_id": 2,
+        "sensor_id": "lidar_2"
+      }
+    },
+    {
+      "frame": {
+        "acquired_at_unix_ms": 1800000000000,
+        "acquired_monotonic_ns": 1500000000,
+        "config_revision": "parity-v1",
+        "edge_id": "synthetic-edge",
+        "instance_id": "parity-lidar_1",
+        "samples": [
+          {
+            "angle_mdeg": 764,
+            "distance_mm": 9331,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 36760,
+            "distance_mm": 835,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 72762,
+            "distance_mm": 523,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 108759,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 144761,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 180764,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 216760,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 252762,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 288759,
+            "distance_mm": 3696,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 324761,
+            "distance_mm": 6066,
+            "quality": 12
+          }
+        ],
+        "scan_hz": 4.0,
+        "schema_version": "1.0",
+        "sdk_status": "OK",
+        "sensor_id": "lidar_1",
+        "sequence": 2
+      },
+      "protobuf_hex": "0a03312e30120e73796e7468657469632d656467651a076c696461725f3120022880a0f1c2b1343080dea0cb053a024f4b4100000000000010404a0808fc0510f348180c4a0908989f0210c306180c4a0908bab804108b04180c4a0408d7d1064a0408f9ea084a04089c840b4a0408b89d0d4a0408dab60f4a0908f7cf1110f01c180c4a090899e91310b22f180c520e7061726974792d6c696461725f315a097061726974792d7631",
+      "reference": {
+        "angles_deg": [
+          144.7613525390625,
+          180.7635498046875,
+          216.76025390625,
+          252.762451171875,
+          288.7591552734375,
+          324.7613525390625,
+          0.7635498046875,
+          36.76025390625,
+          72.762451171875,
+          108.7591552734375
+        ],
+        "completed_at_s": 0.75,
+        "distances_m": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          3.696354979579243,
+          6.066032717541501,
+          9.330933868684372,
+          0.8354665762095587,
+          0.5235139622962557,
+          0.0
+        ],
+        "hit_kinds": [
+          null,
+          null,
+          null,
+          null,
+          "wall",
+          "wall",
+          "surface",
+          "wall",
+          "wall",
+          null
+        ],
+        "point_elapsed_times_s": [
+          0.5,
+          0.525,
+          0.55,
+          0.575,
+          0.6,
+          0.625,
+          0.65,
+          0.675,
+          0.7,
+          0.725
+        ],
+        "rotation_started_at_s": 0.5,
+        "scan_id": 3,
+        "sensor_id": "lidar_1"
+      }
+    },
+    {
+      "frame": {
+        "acquired_at_unix_ms": 1800000000000,
+        "acquired_monotonic_ns": 1500000001,
+        "config_revision": "parity-v1",
+        "edge_id": "synthetic-edge",
+        "instance_id": "parity-lidar_2",
+        "samples": [
+          {
+            "angle_mdeg": 19907,
+            "distance_mm": 10754,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 55904,
+            "distance_mm": 4709,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 91906,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 127908,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 163905,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 199907,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 235904,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 271906,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 307908,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 343905,
+            "distance_mm": 5050,
+            "quality": 12
+          }
+        ],
+        "scan_hz": 4.0,
+        "schema_version": "1.0",
+        "sdk_status": "OK",
+        "sensor_id": "lidar_2",
+        "sequence": 2
+      },
+      "protobuf_hex": "0a03312e30120e73796e7468657469632d656467651a076c696461725f3220022880a0f1c2b1343081dea0cb053a024f4b4100000000000010404a0908c39b01108254180c4a0908e0b40310e524180c4a040882ce054a0408a4e7074a0408c1800a4a0408e3990c4a040880b30e4a0408a2cc104a0408c4e5124a0908e1fe1410ba27180c520e7061726974792d6c696461725f325a097061726974792d7631",
+      "reference": {
+        "angles_deg": [
+          91.9061279296875,
+          127.9083251953125,
+          163.905029296875,
+          199.9072265625,
+          235.9039306640625,
+          271.9061279296875,
+          307.9083251953125,
+          343.905029296875,
+          19.9072265625,
+          55.9039306640625
+        ],
+        "completed_at_s": 0.75,
+        "distances_m": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          5.049952740821661,
+          10.754497642756899,
+          4.709582995749319
+        ],
+        "hit_kinds": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "wall",
+          "surface",
+          "wall"
+        ],
+        "point_elapsed_times_s": [
+          0.5,
+          0.525,
+          0.55,
+          0.575,
+          0.6,
+          0.625,
+          0.65,
+          0.675,
+          0.7,
+          0.725
+        ],
+        "rotation_started_at_s": 0.5,
+        "scan_id": 3,
+        "sensor_id": "lidar_2"
+      }
+    },
+    {
+      "frame": {
+        "acquired_at_unix_ms": 1800000000000,
+        "acquired_monotonic_ns": 1750000000,
+        "config_revision": "parity-v1",
+        "edge_id": "synthetic-edge",
+        "instance_id": "parity-lidar_1",
+        "samples": [
+          {
+            "angle_mdeg": 764,
+            "distance_mm": 9331,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 36760,
+            "distance_mm": 835,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 72762,
+            "distance_mm": 523,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 108759,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 144761,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 180764,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 216760,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 252762,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 288759,
+            "distance_mm": 3696,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 324761,
+            "distance_mm": 6066,
+            "quality": 12
+          }
+        ],
+        "scan_hz": 4.0,
+        "schema_version": "1.0",
+        "sdk_status": "OK",
+        "sensor_id": "lidar_1",
+        "sequence": 3
+      },
+      "protobuf_hex": "0a03312e30120e73796e7468657469632d656467651a076c696461725f3120032880a0f1c2b1343080c3bbc2063a024f4b4100000000000010404a0808fc0510f348180c4a0908989f0210c306180c4a0908bab804108b04180c4a0408d7d1064a0408f9ea084a04089c840b4a0408b89d0d4a0408dab60f4a0908f7cf1110f01c180c4a090899e91310b22f180c520e7061726974792d6c696461725f315a097061726974792d7631",
+      "reference": {
+        "angles_deg": [
+          144.7613525390625,
+          180.7635498046875,
+          216.76025390625,
+          252.762451171875,
+          288.7591552734375,
+          324.7613525390625,
+          0.7635498046875,
+          36.76025390625,
+          72.762451171875,
+          108.7591552734375
+        ],
+        "completed_at_s": 1.0,
+        "distances_m": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          3.696354979579243,
+          6.066032717541501,
+          9.330933868684372,
+          0.8354665762095587,
+          0.5235139622962557,
+          0.0
+        ],
+        "hit_kinds": [
+          null,
+          null,
+          null,
+          null,
+          "wall",
+          "wall",
+          "surface",
+          "wall",
+          "wall",
+          null
+        ],
+        "point_elapsed_times_s": [
+          0.75,
+          0.775,
+          0.8,
+          0.825,
+          0.85,
+          0.875,
+          0.9,
+          0.925,
+          0.95,
+          0.975
+        ],
+        "rotation_started_at_s": 0.75,
+        "scan_id": 4,
+        "sensor_id": "lidar_1"
+      }
+    },
+    {
+      "frame": {
+        "acquired_at_unix_ms": 1800000000000,
+        "acquired_monotonic_ns": 1750000001,
+        "config_revision": "parity-v1",
+        "edge_id": "synthetic-edge",
+        "instance_id": "parity-lidar_2",
+        "samples": [
+          {
+            "angle_mdeg": 19907,
+            "distance_mm": 10754,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 55904,
+            "distance_mm": 4709,
+            "quality": 12
+          },
+          {
+            "angle_mdeg": 91906,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 127908,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 163905,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 199907,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 235904,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 271906,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 307908,
+            "distance_mm": 0,
+            "quality": 0
+          },
+          {
+            "angle_mdeg": 343905,
+            "distance_mm": 5050,
+            "quality": 12
+          }
+        ],
+        "scan_hz": 4.0,
+        "schema_version": "1.0",
+        "sdk_status": "OK",
+        "sensor_id": "lidar_2",
+        "sequence": 3
+      },
+      "protobuf_hex": "0a03312e30120e73796e7468657469632d656467651a076c696461725f3220032880a0f1c2b1343081c3bbc2063a024f4b4100000000000010404a0908c39b01108254180c4a0908e0b40310e524180c4a040882ce054a0408a4e7074a0408c1800a4a0408e3990c4a040880b30e4a0408a2cc104a0408c4e5124a0908e1fe1410ba27180c520e7061726974792d6c696461725f325a097061726974792d7631",
+      "reference": {
+        "angles_deg": [
+          91.9061279296875,
+          127.9083251953125,
+          163.905029296875,
+          199.9072265625,
+          235.9039306640625,
+          271.9061279296875,
+          307.9083251953125,
+          343.905029296875,
+          19.9072265625,
+          55.9039306640625
+        ],
+        "completed_at_s": 1.0,
+        "distances_m": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          5.049952740821661,
+          10.754497642756899,
+          4.709582995749319
+        ],
+        "hit_kinds": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "wall",
+          "surface",
+          "wall"
+        ],
+        "point_elapsed_times_s": [
+          0.75,
+          0.775,
+          0.8,
+          0.825,
+          0.85,
+          0.875,
+          0.9,
+          0.925,
+          0.95,
+          0.975
+        ],
+        "rotation_started_at_s": 0.75,
+        "scan_id": 4,
+        "sensor_id": "lidar_2"
+      }
+    }
+  ],
+  "stable_sort_case": {
+    "frame": {
+      "acquired_at_unix_ms": 1800000000000,
+      "acquired_monotonic_ns": 1100000000,
+      "config_revision": "parity-v1",
+      "edge_id": "synthetic-edge",
+      "instance_id": "parity-lidar_1",
+      "samples": [
+        {
+          "angle_mdeg": 0,
+          "distance_mm": 0,
+          "quality": 6
+        },
+        {
+          "angle_mdeg": 9998,
+          "distance_mm": 2000,
+          "quality": 12
+        },
+        {
+          "angle_mdeg": 9998,
+          "distance_mm": 3000,
+          "quality": 20
+        },
+        {
+          "angle_mdeg": 90000,
+          "distance_mm": 1234,
+          "quality": 63
+        },
+        {
+          "angle_mdeg": 180000,
+          "distance_mm": 30000,
+          "quality": 0
+        }
+      ],
+      "scan_hz": 10.0,
+      "schema_version": "1.0",
+      "sdk_status": "OK",
+      "sensor_id": "lidar_1",
+      "sequence": 1
+    },
+    "input_angles_deg": [
+      90.0,
+      9.99755859375,
+      9.99755859375,
+      0.0,
+      180.0
+    ],
+    "input_distances_m": [
+      1.2345,
+      2.00025,
+      3.00075,
+      0.0,
+      30.0
+    ],
+    "input_quality_bytes": [
+      255,
+      48,
+      80,
+      24,
+      0
+    ],
+    "protobuf_hex": "0a03312e30120e73796e7468657469632d656467651a076c696461725f3120012880a0f1c2b1343080d6c28c043a024f4b4100000000000024404a0218064a08088e4e10d00f180c4a08088e4e10b81718144a090890bf0510d209183f4a0808a0fe0a10b0ea01520e7061726974792d6c696461725f315a097061726974792d7631"
+  }
+}

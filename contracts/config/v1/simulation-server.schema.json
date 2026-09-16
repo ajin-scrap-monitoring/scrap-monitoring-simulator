@@ -1,0 +1,385 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ajin-scrap-monitoring/scrap-monitoring-simulator/contracts/config/v1/simulation-server.schema.json",
+  "title": "Simulation server configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "config_version",
+    "seed",
+    "environment_path",
+    "quality_profile_path",
+    "scenario",
+    "measurement"
+  ],
+  "properties": {
+    "config_version": {
+      "const": 1
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "environment_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "quality_profile_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scenario": {
+      "$ref": "#/$defs/scenario"
+    },
+    "measurement": {
+      "$ref": "#/$defs/measurement"
+    }
+  },
+  "$defs": {
+    "positiveNumber": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0
+    },
+    "ratio": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "positiveRatio": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1
+    },
+    "positiveRange": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/positiveNumber"
+      }
+    },
+    "numberRange": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number"
+      }
+    },
+    "positiveRatioRange": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/positiveRatio"
+      }
+    },
+    "coordinate2": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number"
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mean_fill_duration_s",
+        "fill_duration_factor_range",
+        "fill_rate_factor_range",
+        "fill_rate_change_duration_s_range",
+        "collection_threshold_range",
+        "collection_duration_factor_range",
+        "collection_rate_factor_range",
+        "collection_rate_change_duration_s_range",
+        "inlet_positions_xy_m",
+        "inlet_switch_activation_ratio",
+        "inlet_switch_height_difference_m",
+        "inlet_comparison_radius_m",
+        "surface"
+      ],
+      "properties": {
+        "mean_fill_duration_s": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "fill_duration_factor_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "fill_rate_factor_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "fill_rate_change_duration_s_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "collection_threshold_range": {
+          "$ref": "#/$defs/positiveRatioRange"
+        },
+        "collection_duration_factor_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "collection_rate_factor_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "collection_rate_change_duration_s_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "inlet_positions_xy_m": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/coordinate2"
+          }
+        },
+        "inlet_switch_activation_ratio": {
+          "$ref": "#/$defs/ratio"
+        },
+        "inlet_switch_height_difference_m": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "inlet_comparison_radius_m": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "surface": {
+          "$ref": "#/$defs/surface"
+        }
+      }
+    },
+    "surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cell_size_m",
+        "update_interval_s",
+        "pile_spread_radius_m",
+        "roughness_height_range_m",
+        "roughness_radius_range_m"
+      ],
+      "properties": {
+        "cell_size_m": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "update_interval_s": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "pile_spread_radius_m": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "roughness_height_range_m": {
+          "$ref": "#/$defs/numberRange"
+        },
+        "roughness_radius_range_m": {
+          "$ref": "#/$defs/positiveRange"
+        }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sample_rate_hz",
+        "rotation_rate_hz",
+        "min_distance_m",
+        "max_distance_m",
+        "distance_noise",
+        "distortions"
+      ],
+      "properties": {
+        "sample_rate_hz": {
+          "$ref": "#/$defs/positiveNumber",
+          "description": "The loader also validates the processing frame limit documented in docs/configuration.md."
+        },
+        "rotation_rate_hz": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "min_distance_m": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 30
+        },
+        "max_distance_m": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 30
+        },
+        "distance_noise": {
+          "$ref": "#/$defs/distanceNoise"
+        },
+        "distortions": {
+          "$ref": "#/$defs/distortions"
+        }
+      }
+    },
+    "distanceNoise": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "standard_deviation_m", "limit_m"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "standard_deviation_m": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "limit_m": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        }
+      }
+    },
+    "distortions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "falling_material",
+        "voids",
+        "collection_occlusion",
+        "reflection_error",
+        "dropout"
+      ],
+      "properties": {
+        "falling_material": {
+          "$ref": "#/$defs/fallingMaterial"
+        },
+        "voids": {
+          "$ref": "#/$defs/voids"
+        },
+        "collection_occlusion": {
+          "$ref": "#/$defs/collectionOcclusion"
+        },
+        "reflection_error": {
+          "$ref": "#/$defs/reflectionError"
+        },
+        "dropout": {
+          "$ref": "#/$defs/dropout"
+        }
+      }
+    },
+    "fallingMaterial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "event_rate_per_s",
+        "radius_m_range",
+        "duration_s_range",
+        "distance_reduction_m_range"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "event_rate_per_s": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "radius_m_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "duration_s_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "distance_reduction_m_range": {
+          "$ref": "#/$defs/positiveRange"
+        }
+      }
+    },
+    "voids": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "surface_area_ratio",
+        "radius_m_range",
+        "duration_s_range",
+        "cover_height_increase_m",
+        "distance_increase_m_range"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "surface_area_ratio": {
+          "$ref": "#/$defs/ratio"
+        },
+        "radius_m_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "duration_s_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "cover_height_increase_m": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "distance_increase_m_range": {
+          "$ref": "#/$defs/positiveRange"
+        }
+      }
+    },
+    "collectionOcclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "event_interval_s_range",
+        "radius_m_range",
+        "duration_s_range",
+        "distance_reduction_m_range"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "event_interval_s_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "radius_m_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "duration_s_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "distance_reduction_m_range": {
+          "$ref": "#/$defs/positiveRange"
+        }
+      }
+    },
+    "reflectionError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "probability", "distance_reduction_m_range"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "probability": {
+          "$ref": "#/$defs/ratio"
+        },
+        "distance_reduction_m_range": {
+          "$ref": "#/$defs/positiveRange"
+        }
+      }
+    },
+    "dropout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "event_interval_s_range", "duration_s_range"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "event_interval_s_range": {
+          "$ref": "#/$defs/positiveRange"
+        },
+        "duration_s_range": {
+          "$ref": "#/$defs/positiveRange"
+        }
+      }
+    }
+  }
+}
