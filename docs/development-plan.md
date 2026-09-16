@@ -20,3 +20,16 @@ edge bridge 구현은 아직 포함하지 않는다.
 
 각 단계는 대상 Repository Issue와 Pull Request로 완료한다. 기존 저장소의 코드는 출처와
 현재 동작을 확인한 뒤 필요한 구현만 명시적으로 이관한다.
+
+## 다음 작업
+
+P0가 완료되면 P1 Issue를 시작한다. P1은 [구현 입력 기준](source-baselines.md)의
+commit을 검증하고 다음 4개 계약을 먼저 고정한다.
+
+1. World XYZ의 정적 scene definition
+2. Simulation clock이 포함된 불변 scene frame
+3. Sensor pose와 S2E adapter가 소비하는 scan 입력
+4. Visual adapter가 소비하는 latest-only scene stream
+
+P1에서는 network server, VTK renderer와 edge bridge를 구현하지 않는다. 계약과 결정론적
+fixture를 검증한 뒤 P2와 P3에서 동일한 frame을 소비한다.

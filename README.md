@@ -4,8 +4,6 @@
 scene을 기준으로 RPLIDAR S2E 호환 입력, Browser 시각화와 합성 camera 입력을 제공하는
 구조를 정의한다. 실제 edge platform과 운영 서비스는 이 저장소의 범위가 아니다.
 
-현재 저장소에는 제품 경계, 아키텍처 기준과 Repository 자동 검사가 포함돼 있다.
-
 ## 빠른 시작
 
 Python 3.11 이상이 필요하다. Checkout한 저장소 루트에서 다음 명령으로 현재 구조를
@@ -27,6 +25,7 @@ python3 tools/check_repository.py
 | [프로젝트 명세](docs/project-spec.md) | 제품 범위, 외부 경계와 완료 조건 |
 | [아키텍처](docs/architecture.md) | 상태 소유권과 실행 구성 요소 경계 |
 | [개발 계획](docs/development-plan.md) | 현재 구현 상태와 작업 순서 |
+| [구현 입력 기준](docs/source-baselines.md) | 이관 입력의 고정 commit과 적용 경계 |
 | [프로젝트 작업 지침](.agents/AGENTS.md) | Repository 작업과 검증 규칙 |
 
 ## 이용 조건
