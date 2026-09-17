@@ -76,7 +76,15 @@ def test_y_major_height_mapping(records: tuple[SceneDefinition, SceneFrame]) -> 
         y_coordinates_m=(0.0, 1.0),
         heights_m=((0.0, 0.1, 0.2), (0.3, 0.4, 0.5)),
     )
-    geometry = build_scene_geometry(header, replace(frame, surface=surface))
+    static_surface = replace(
+        header.scene.surface,
+        x_coordinates_m=surface.x_coordinates_m,
+        y_coordinates_m=surface.y_coordinates_m,
+    )
+    geometry = build_scene_geometry(
+        replace(header, scene=replace(header.scene, surface=static_surface)),
+        replace(frame, surface=surface),
+    )
 
     assert (0.5, 0.0, 0.1) in geometry.surface.vertices
     assert (0.5, 1.0, 0.4) in geometry.surface.vertices
@@ -109,6 +117,11 @@ def test_concave_boundary_clips_crossing_cells(
         boundary_xy_m=boundary,
         inlet_positions_xy_m=((0.5, 0.5),),
         top_z_m=5.0,
+        surface=replace(
+            header.scene.surface,
+            x_coordinates_m=(0.0, 1.0, 2.0),
+            y_coordinates_m=(0.0, 1.0, 2.0),
+        ),
     )
     surface = replace(
         frame.surface,
@@ -124,6 +137,71 @@ def test_concave_boundary_clips_crossing_cells(
         geometry.surface.vertices, geometry.surface.faces
     ) == pytest.approx(3.0)
     assert all(not (x > 1.0 and y > 1.0) for x, y, _ in geometry.surface.vertices)
+
+
+def test_static_topology_clips_concave_boundary_without_a_frame(
+    records: tuple[SceneDefinition, SceneFrame],
+) -> None:
+    header, _ = records
+    scene = replace(
+        header.scene,
+        boundary_xy_m=(
+            (0.0, 0.0),
+            (2.0, 0.0),
+            (2.0, 1.0),
+            (1.0, 1.0),
+            (1.0, 2.0),
+            (0.0, 2.0),
+        ),
+        inlet_positions_xy_m=((0.5, 0.5),),
+        top_z_m=5.0,
+        surface=replace(
+            header.scene.surface,
+            x_coordinates_m=(0.0, 1.0, 2.0),
+            y_coordinates_m=(0.0, 1.0, 2.0),
+        ),
+    )
+
+    topology = build_scene_geometry_topology(replace(header, scene=scene))
+    surface_vertices = tuple((x, y, 0.0) for x, y in topology.surface_xy)
+
+    assert _projected_area(surface_vertices, topology.surface_faces) == pytest.approx(
+        3.0
+    )
+    assert topology.surface_xy == (
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (1.0, 0.5),
+        (1.0, 1.0),
+        (0.0, 1.0),
+        (2.0, 0.0),
+        (2.0, 1.0),
+        (0.5, 1.5),
+        (1.0, 2.0),
+        (0.0, 2.0),
+    )
+    assert topology.surface_faces == (
+        (0, 1, 2),
+        (0, 2, 3),
+        (0, 3, 4),
+        (1, 5, 6),
+        (1, 6, 2),
+        (2, 6, 3),
+        (4, 3, 7),
+        (7, 3, 8),
+        (4, 7, 9),
+        (9, 7, 8),
+    )
+    assert topology.surface_boundary_edges == (
+        (0, 1),
+        (4, 0),
+        (1, 5),
+        (6, 3),
+        (3, 8),
+        (9, 4),
+        (5, 6),
+        (8, 9),
+    )
 
 
 def test_clipped_vertices_interpolate_original_surface(
@@ -230,7 +308,7 @@ def test_cached_topology_updates_heights_without_reclipping(
     records: tuple[SceneDefinition, SceneFrame],
 ) -> None:
     header, frame = records
-    topology = build_scene_geometry_topology(header, frame)
+    topology = build_scene_geometry_topology(header)
     updated = replace(
         frame,
         surface=replace(
@@ -252,7 +330,7 @@ def test_cached_topology_rejects_grid_changes(
     records: tuple[SceneDefinition, SceneFrame],
 ) -> None:
     header, frame = records
-    topology = build_scene_geometry_topology(header, frame)
+    topology = build_scene_geometry_topology(header)
     changed = replace(
         frame,
         surface=replace(frame.surface, cell_size_m=0.5),

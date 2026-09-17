@@ -19,11 +19,17 @@ GitHub Release는 image digest 3개를 기록한 `oci-images.txt`와 `deploy/` a
 `deploy/server/.env.example`을 `.env`로 복사하고 zero digest를 release digest로 교체한다.
 
 ```bash
+scripts/check-deployment.sh deploy/server/.env
 docker compose --env-file deploy/server/.env \
   --file deploy/server/compose.yml up --detach
 ```
 
-Browser는 설정한 HTTP port를 사용한다. LiDAR SDK client는 sensor별 UDP port 8089와 8090을 사용한다. Compose는 Visualizer health check가 통과한 뒤 Simulation server를 시작한다.
+Browser는 설정한 HTTP port를 사용한다. LiDAR SDK client는 서로 다른 Server IPv4 주소에 공통 UDP
+port 8089로 연결한다. `.env.example`의 `127.0.0.2`와 `127.0.0.3`은 공개 loopback 예시이며
+외부 SDK client를 연결할 때는 Server interface에 실제로 설정한 두 주소로 교체한다. Compose는
+Sensor 1을 내부 UDP 8089에, Sensor 2를 내부 UDP 8090에 연결하고 Visualizer health check가
+통과한 뒤 Simulation server를 시작한다. 배포 검사는 두 외부 endpoint가 모두 UDP 8089를
+사용하고 두 host IPv4 주소가 서로 다른지 확인한다.
 
 Server 통합 probe는 설정한 release image로 임시 Container를 실행해 scene v2 stream, Browser paired visual stream과 1920 x 1080 raw camera stream을 확인한다.
 
@@ -36,20 +42,21 @@ SCRAP_SIMULATOR_TEST_SERVER_IMAGE="$SCRAP_SIMULATION_SERVER_IMAGE" \
   scripts/check.sh amd64-runtime
 ```
 
-실제 Browser 수락 검사는 Mac Chrome과 Ubuntu Server의 release Visualizer image 사이에서 Chrome DevTools Protocol (CDP)로 수행한다. Chrome은 별도 임시 profile, remote debugging port, 전경 window를 사용한다. Server는 release image 실행 전과 실행 중 `scripts/server-health-guard.sh`로 열, load, CPU Pressure Stall Information (PSI), available memory, swap과 격리 acceptance container 상태를 기록한다.
+실제 Browser 수락 검사는 Mac Chrome과 Ubuntu Server의 release Visualizer image 사이에서 Chrome DevTools Protocol (CDP)로 수행한다. Chrome은 별도 임시 profile, remote debugging port, 전경 window를 사용한다. Server는 release image 실행 전과 실행 중 `scripts/server-health-guard.sh`로 열, load, CPU Pressure Stall Information (PSI), available memory, swap과 검증 대상 container 상태를 기록한다.
 
 ```bash
 scripts/server-health-guard.sh \
-  --container <acceptance-container> \
+  --container scrap-monitoring-simulator-server \
+  --container scrap-monitoring-simulator-visualizer \
   --preflight-seconds 60 \
   --soak-seconds 300 \
   --cooldown-seconds 60 \
-  -- <isolated-acceptance-command>
+  -- <validation-command>
 ```
 
 Guard는 preflight에서 temperature sensor, load, CPU PSI, memory와 swap의 기준을 확인한다. `SCRAP_SIMULATOR_HEALTH_REQUIRE_TEMPERATURE=false`을 명시하지 않으면 temperature sensor를 읽지 못한 host에서는 수락을 시작하지 않는다. Soak 중 temperature, 지속 load 또는 PSI, memory, swap 증가, tracked container unhealthy, restart와 OOM을 감지하면 guarded process group만 중지한다. Guard는 다른 Container나 process를 중지하지 않는다.
 
-Browser probe는 5분 동안 model과 camera presentation이 각각 27 FPS 이상이고 5초 안정 창의 90 percent 이상이 기준을 만족하는지 확인한다. Target mismatch와 decode error는 0이어야 하고 pending decode, decode in-flight, pending presentation은 각각 1 이하여야 한다. 같은 실행에서 공식 SDK sensor 2대의 10 Hz cadence와 edge V4L2 90 frame 검사를 완료한다.
+Browser probe는 5분 동안 model과 camera presentation이 각각 27 FPS 이상이고 5초 안정 창의 90 percent 이상이 기준을 만족하는지 확인한다. Target mismatch와 decode error는 0이어야 하고 pending decode, decode in-flight, pending presentation은 각각 1 이하여야 한다. 같은 실행에서 공식 SDK sensor 2대의 HQ scan 수신과 edge V4L2 90 frame 검사를 완료한다.
 
 ## Edge 배포
 

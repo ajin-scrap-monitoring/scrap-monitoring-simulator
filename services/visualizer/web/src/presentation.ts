@@ -39,6 +39,7 @@ export class LatestTargetPresentation {
       this.latest.image.close();
     }
     this.latest = undefined;
+    this.lastPresentedTarget = -1;
   }
 
   get pendingTargetId(): number | undefined {

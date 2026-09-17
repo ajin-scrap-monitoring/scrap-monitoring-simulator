@@ -30,3 +30,14 @@ test("latest target replaces queued work without catchup", () => {
   assert.equal(presentation.consume()?.frame.metadata.target_id, 3);
   assert.equal(presentation.offer(candidate(2)), false);
 });
+
+test("reset accepts a restarted stream whose target ids begin again", () => {
+  const presentation = new LatestTargetPresentation();
+  assert.equal(presentation.offer(candidate(20)), true);
+  assert.equal(presentation.consume()?.frame.metadata.target_id, 20);
+
+  presentation.reset();
+
+  assert.equal(presentation.offer(candidate(0)), true);
+  assert.equal(presentation.consume()?.frame.metadata.target_id, 0);
+});

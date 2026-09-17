@@ -62,14 +62,14 @@ class LiveCoordinator:
 
     @property
     def definition(self) -> SceneDefinition | None:
-        return self._state.header
+        return self._state.header if self._state.connected else None
 
     def state_changed(self, state: ExecutionState) -> None:
         self._state = state
         if self._camera is not None:
             self._camera.state_changed(state)
         segment = state.segment
-        if segment is None:
+        if not state.connected or segment is None:
             self._visual_store.clear()
             self._last_received_sequence = None
             self._last_valid_received_at = None

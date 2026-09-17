@@ -32,6 +32,7 @@ class FakeWorker:
         self.invalidations = 0
         self.submitted: list[CameraRenderRequest] = []
         self.outcomes: deque[CameraRenderOutcome] = deque()
+        self.replaced_on_submit: deque[int | None] = deque()
 
     def start(self) -> None:
         self.started = True
@@ -40,8 +41,9 @@ class FakeWorker:
     def is_alive(self) -> bool:
         return self.alive
 
-    def submit(self, request: CameraRenderRequest) -> None:
+    def submit(self, request: CameraRenderRequest) -> int | None:
         self.submitted.append(request)
+        return self.replaced_on_submit.popleft() if self.replaced_on_submit else None
 
     def invalidate(self) -> None:
         self.invalidations += 1
@@ -191,3 +193,37 @@ def test_pipeline_fails_when_camera_renderer_process_exits() -> None:
         raise AssertionError("dead camera renderer was not detected")
     finally:
         pipeline.close()
+
+
+def test_pipeline_discards_replaced_and_failed_frame_metadata() -> None:
+    header, segment = _records()
+    worker = FakeWorker()
+    now = [10.0]
+    pipeline = SyntheticCameraPipeline(
+        SyntheticCameraConfig.from_file(), worker=worker, clock=lambda: now[0]
+    )
+    pipeline.state_changed(_state(header, segment))
+    assert set(pipeline._frames_by_target) == {0}
+
+    worker.replaced_on_submit.append(0)
+    now[0] += 1 / 30
+    pipeline.poll(now=now[0])
+    assert set(pipeline._frames_by_target) == {1}
+
+    worker.outcomes.append(
+        CameraRenderOutcome(
+            generation=0,
+            target_id=1,
+            sequence=1,
+            elapsed_s=1 / 30,
+            mode="interpolated",
+            reason=None,
+            jpeg=None,
+            render_backend=None,
+            render_seconds=0.02,
+            error="render failed",
+        )
+    )
+    pipeline.poll(now=now[0])
+    assert pipeline._frames_by_target == {}
+    pipeline.close()

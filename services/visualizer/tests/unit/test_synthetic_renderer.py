@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import pyvista as pv
 
 from scrap_monitoring_visualizer.contracts import (
     ContractParser,
@@ -17,11 +18,14 @@ from scrap_monitoring_visualizer.contracts import (
 from scrap_monitoring_visualizer.synthetic_camera import SyntheticCameraConfig
 from scrap_monitoring_visualizer.synthetic_camera.models import InterpolatedFrame
 from scrap_monitoring_visualizer.synthetic_camera.renderer import (
+    _CHUTE_JOINT_SEGMENTS,
+    _CHUTE_TIP_SEGMENTS,
     _apply_effects,
     _chute_pivot,
     _chute_poly_data,
     _chute_pose,
     _fixed_conveyor_poly_data,
+    _joint_length_m,
     _validate_render_window,
     camera_placement,
 )
@@ -76,6 +80,79 @@ def _machine_scene() -> tuple[SceneDefinition, SceneFrame]:
     )
 
 
+def _rings(data: pv.PolyData) -> np.ndarray:
+    points = data.points
+    assert isinstance(points, np.ndarray)
+    return points.reshape(-1, 8, 3)
+
+
+def _ring_direction(ring: np.ndarray) -> np.ndarray:
+    lateral = ring[1, :2] - ring[0, :2]
+    lateral /= np.linalg.norm(lateral)
+    return np.asarray((lateral[1], -lateral[0]))
+
+
+def _fixed_terminal_outline(conveyor: pv.PolyData) -> np.ndarray:
+    points = conveyor.points
+    assert isinstance(points, np.ndarray)
+    base, left_rail, right_rail = points.reshape(3, 8, 3)
+    return np.asarray(
+        (
+            base[0],
+            base[1],
+            right_rail[5],
+            right_rail[4],
+            right_rail[0],
+            left_rail[1],
+            left_rail[5],
+            left_rail[4],
+        )
+    )
+
+
+def _segments_cross(
+    first_start: np.ndarray,
+    first_end: np.ndarray,
+    second_start: np.ndarray,
+    second_end: np.ndarray,
+) -> bool:
+    def orientation(
+        start: np.ndarray,
+        end: np.ndarray,
+        point: np.ndarray,
+    ) -> float:
+        segment = end - start
+        relative = point - start
+        return float(segment[0] * relative[1] - segment[1] * relative[0])
+
+    first_side_a = orientation(first_start, first_end, second_start)
+    first_side_b = orientation(first_start, first_end, second_end)
+    second_side_a = orientation(second_start, second_end, first_start)
+    second_side_b = orientation(second_start, second_end, first_end)
+    return (
+        first_side_a * first_side_b < -1e-12 and second_side_a * second_side_b < -1e-12
+    )
+
+
+def _assert_transition_does_not_fold(rings: np.ndarray) -> None:
+    transition = rings[: _CHUTE_JOINT_SEGMENTS + 2]
+    directions = np.asarray([_ring_direction(ring) for ring in transition])
+    for point_index in (0, 1, 3, 5):
+        path = transition[:, point_index, :2]
+        for index, displacement in enumerate(np.diff(path, axis=0)):
+            mean_direction = directions[index] + directions[index + 1]
+            mean_direction /= np.linalg.norm(mean_direction)
+            assert float(np.dot(displacement, mean_direction)) > 0.0
+        for first_index in range(len(path) - 1):
+            for second_index in range(first_index + 2, len(path) - 1):
+                assert not _segments_cross(
+                    path[first_index],
+                    path[first_index + 1],
+                    path[second_index],
+                    path[second_index + 1],
+                )
+
+
 def test_camera_profile_produces_rear_overhead_perspective_placement() -> None:
     config = SyntheticCameraConfig.from_file()
     header, _ = _machine_scene()
@@ -120,7 +197,7 @@ def test_camera_profile_produces_rear_overhead_perspective_placement() -> None:
     assert far_wall_rim_y == pytest.approx(29.16, abs=0.1)
 
 
-def test_fixed_conveyor_trough_and_chute_follow_derived_inlet_geometry() -> None:
+def test_fixed_conveyor_and_straight_chute_form_one_open_trough() -> None:
     header, frame = _machine_scene()
     machine = SyntheticCameraConfig.from_file().machine
     pivot = np.asarray(_chute_pivot(header, machine))
@@ -138,6 +215,7 @@ def test_fixed_conveyor_trough_and_chute_follow_derived_inlet_geometry() -> None
     chute = _chute_poly_data(header, first_frame, machine)
     first_pose = _chute_pose(header, first_frame, machine)
     second_pose = _chute_pose(header, second_frame, machine)
+    joint_length_m = _joint_length_m(header, machine)
 
     assert pivot == pytest.approx((1.5, 2.880214547118024))
     first_vector = first_inlet - pivot
@@ -171,7 +249,9 @@ def test_fixed_conveyor_trough_and_chute_follow_derived_inlet_geometry() -> None
     )
     conveyor_flow = base_terminal[:2] - base_upstream[:2]
     assert np.ptp(base[:, 0]) == pytest.approx(machine.conveyor_width_m)
-    assert np.linalg.norm(conveyor_flow) == pytest.approx(2.06)
+    assert np.linalg.norm(conveyor_flow) == pytest.approx(
+        machine.conveyor_length_m - joint_length_m / 2.0
+    )
     assert conveyor_flow / np.linalg.norm(conveyor_flow) == pytest.approx((0.0, -1.0))
     assert first_vector / first_radius == pytest.approx((0.0, -1.0))
     assert np.ptp(conveyor.points[:, 2]) == pytest.approx(
@@ -189,31 +269,49 @@ def test_fixed_conveyor_trough_and_chute_follow_derived_inlet_geometry() -> None
     assert np.ptp(left_rail[:, 0]) == pytest.approx(0.06)
     assert np.ptp(right_rail[:, 0]) == pytest.approx(0.06)
     assert np.min(right_rail[:, 0]) - np.max(left_rail[:, 0]) == pytest.approx(0.88)
-    assert base_terminal[:2] == pytest.approx(pivot + (0.0, -0.06))
-    assert rail_terminal[:2] == pytest.approx(pivot + (0.0, 0.06))
+    terminal_center = pivot + (0.0, joint_length_m / 2.0)
+    assert base_terminal[:2] == pytest.approx(terminal_center)
+    assert rail_terminal[:2] == pytest.approx(terminal_center)
     conveyor_faces = conveyor.faces.reshape(-1, 5)
-    assert conveyor_faces.shape == (18, 5)
+    assert conveyor_faces.shape == (15, 5)
     assert np.all(conveyor_faces[:, 0] == 4)
 
-    rings = tuple(chute.points[index : index + 8] for index in range(0, 56, 8))
-    ring_centers = tuple(np.mean(ring, axis=0) for ring in rings)
-    deck_centers = tuple(np.mean(ring[[4, 5]], axis=0) for ring in rings)
-    assert ring_centers[0][:2] == pytest.approx(pivot + (0.0, 0.12))
-    assert ring_centers[1][:2] == pytest.approx(pivot)
-    assert ring_centers[2][:2] == pytest.approx(
+    fixed_terminal_faces = (
+        {0, 1, 4, 5},
+        {8, 9, 12, 13},
+        {16, 17, 20, 21},
+    )
+    assert all(
+        set(int(index) for index in face[1:]) not in fixed_terminal_faces
+        for face in conveyor_faces
+    )
+    assert all(
+        len({int(index) // 8 for index in face[1:]}) == 1 for face in conveyor_faces
+    )
+
+    rings = _rings(chute)
+    ring_centers = np.mean(rings, axis=1)
+    deck_centers = np.mean(rings[:, [4, 5]], axis=1)
+    assert rings.shape == (_CHUTE_JOINT_SEGMENTS + _CHUTE_TIP_SEGMENTS + 2, 8, 3)
+    assert rings[0] == pytest.approx(_fixed_terminal_outline(conveyor))
+    assert ring_centers[0, :2] == pytest.approx(terminal_center)
+    assert ring_centers[_CHUTE_JOINT_SEGMENTS, :2] == pytest.approx(
+        pivot + (0.0, -joint_length_m / 2.0)
+    )
+    assert ring_centers[_CHUTE_JOINT_SEGMENTS + 1, :2] == pytest.approx(
         pivot + machine.tip_fraction * first_vector
     )
-    assert ring_centers[-1][:2] == pytest.approx(first_inlet)
-    assert deck_centers[0][2] == pytest.approx(deck_centers[1][2])
-    assert deck_centers[1][2] == pytest.approx(deck_centers[2][2])
-    assert deck_centers[0][2] - deck_centers[-1][2] == pytest.approx(machine.tip_drop_m)
-    tip_heights = np.asarray([center[2] for center in deck_centers[2:]])
-    assert np.all(np.diff(tip_heights) <= 0.0)
+    assert ring_centers[-1, :2] == pytest.approx(first_inlet)
+    level_decks = deck_centers[: _CHUTE_JOINT_SEGMENTS + 2, 2]
+    assert level_decks == pytest.approx(np.full_like(level_decks, level_decks[0]))
+    assert deck_centers[0, 2] - deck_centers[-1, 2] == pytest.approx(machine.tip_drop_m)
+    tip_heights = deck_centers[_CHUTE_JOINT_SEGMENTS + 1 :, 2]
     assert np.all(np.diff(tip_heights) < 0.0)
-    assert np.linalg.norm(rings[0][1] - rings[0][0]) == pytest.approx(1.04)
-    assert np.linalg.norm(rings[1][1] - rings[1][0]) == pytest.approx(1.0)
-    assert np.linalg.norm(rings[2][1] - rings[2][0]) == pytest.approx(1.0)
-    assert np.linalg.norm(rings[-1][1] - rings[-1][0]) == pytest.approx(0.9)
+    widths = np.linalg.norm(rings[:, 1] - rings[:, 0], axis=1)
+    assert widths[: _CHUTE_JOINT_SEGMENTS + 2] == pytest.approx(
+        np.full(_CHUTE_JOINT_SEGMENTS + 2, machine.conveyor_width_m)
+    )
+    assert widths[-1] == pytest.approx(machine.outlet_width_m)
     assert all(
         ring[2][2] - ring[1][2] == pytest.approx(machine.duct_height_m)
         for ring in rings
@@ -227,43 +325,38 @@ def test_fixed_conveyor_trough_and_chute_follow_derived_inlet_geometry() -> None
         and np.linalg.norm(ring[7] - ring[6]) == pytest.approx(0.06)
         for ring in rings
     )
-    assert np.linalg.norm(rings[1][5] - rings[1][4]) == pytest.approx(0.88)
-    assert np.linalg.norm(rings[2][5] - rings[2][4]) == pytest.approx(0.88)
+    assert np.linalg.norm(rings[0][5] - rings[0][4]) == pytest.approx(0.88)
+    assert np.linalg.norm(rings[7][5] - rings[7][4]) == pytest.approx(0.88)
     assert np.linalg.norm(rings[-1][5] - rings[-1][4]) == pytest.approx(0.78)
-    assert rings[1][0][2] == pytest.approx(np.min(base[:, 2]))
-    assert rings[1][4][2] == pytest.approx(np.max(base[:, 2]))
-    assert rings[1][2][2] == pytest.approx(np.max(left_rail[:, 2]))
-    socket_axis = ring_centers[1][:2] - ring_centers[0][:2]
-    socket_axis /= np.linalg.norm(socket_axis)
-    rail_in_socket_m = float(
-        np.dot(rail_terminal[:2] - ring_centers[0][:2], socket_axis)
-    )
-    assert rail_in_socket_m == pytest.approx(0.06)
-    assert np.linalg.norm(ring_centers[1][:2] - ring_centers[0][:2]) == pytest.approx(
-        0.12
-    )
+    assert rings[0][0][2] == pytest.approx(np.min(base[:, 2]))
+    assert rings[0][4][2] == pytest.approx(np.max(base[:, 2]))
+    assert rings[0][2][2] == pytest.approx(np.max(left_rail[:, 2]))
+    assert all(_ring_direction(ring) == pytest.approx((0.0, -1.0)) for ring in rings)
     faces = chute.faces.reshape(-1, 5)
-    assert faces.shape == (48, 5)
+    assert faces.shape == ((len(rings) - 1) * 8, 5)
     assert np.all(faces[:, 0] == 4)
     assert all(len({int(index) // 8 for index in face[1:]}) == 2 for face in faces)
     cross_section_edges = {
         tuple(sorted((int(face[1]) % 8, int(face[2]) % 8))) for face in faces
     }
+    assert cross_section_edges == {
+        (0, 1),
+        (0, 7),
+        (1, 2),
+        (2, 3),
+        (3, 4),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+    }
     assert (3, 6) not in cross_section_edges
-    assert (4, 5) in cross_section_edges
+    _assert_transition_does_not_fold(rings)
 
     moved = _chute_poly_data(header, second_frame, machine)
     assert np.mean(moved.points[-8:, :2], axis=0) == pytest.approx(second_inlet)
     assert math.degrees(second_pose.polar_angle_rad) == pytest.approx(
         -12.010686806284566
     )
-    distances = np.linalg.norm(
-        chute.points[:, np.newaxis, :] - chute.points[np.newaxis, :, :], axis=2
-    )
-    moved_distances = np.linalg.norm(
-        moved.points[:, np.newaxis, :] - moved.points[np.newaxis, :, :], axis=2
-    )
-    assert moved_distances == pytest.approx(distances)
 
 
 def test_chute_outlet_follows_deterministic_polar_transition() -> None:
@@ -290,7 +383,7 @@ def test_chute_outlet_follows_deterministic_polar_transition() -> None:
     assert math.degrees(pose.polar_angle_rad) == pytest.approx(-51.005343403142284)
 
 
-def test_chute_rotation_eases_continuously_and_preserves_local_shape() -> None:
+def test_chute_rotation_eases_continuously_and_preserves_joint_contract() -> None:
     header, frame = _machine_scene()
     machine = SyntheticCameraConfig.from_file().machine
 
@@ -324,27 +417,63 @@ def test_chute_rotation_eases_continuously_and_preserves_local_shape() -> None:
     )
     assert [pose.polar_angle_rad for pose in reverse_poses] == pytest.approx(angles)
 
-    meshes = tuple(
-        _chute_poly_data(header, frame, machine, interpolated(alpha))
-        for alpha in alphas
-    )
-    reference_distances = np.linalg.norm(
-        meshes[0].points[:, np.newaxis, :] - meshes[0].points[np.newaxis, :, :],
-        axis=2,
-    )
-    for pose, mesh in zip(poses, meshes, strict=True):
-        rings = mesh.points.reshape(-1, 8, 3)
+    conveyor = _fixed_conveyor_poly_data(header, machine)
+    terminal_outline = _fixed_terminal_outline(conveyor)
+    joint_length_m = _joint_length_m(header, machine)
+    tip_start_index = _CHUTE_JOINT_SEGMENTS + 1
+    for alpha in (0.0, 0.5, 1.0):
+        interpolation = interpolated(alpha)
+        pose = _chute_pose(header, frame, machine, interpolation)
+        mesh = _chute_poly_data(header, frame, machine, interpolation)
+        rings = _rings(mesh)
         centers = np.mean(rings, axis=1)
-        longitudinal = centers[2] - centers[1]
-        longitudinal /= np.linalg.norm(longitudinal)
-        assert longitudinal == pytest.approx(
-            (math.cos(pose.polar_angle_rad), math.sin(pose.polar_angle_rad), 0.0)
+        directions = np.asarray([_ring_direction(ring) for ring in rings])
+        chute_direction = np.asarray(
+            (math.cos(pose.polar_angle_rad), math.sin(pose.polar_angle_rad))
         )
-        distances = np.linalg.norm(
-            mesh.points[:, np.newaxis, :] - mesh.points[np.newaxis, :, :],
-            axis=2,
+        pivot = np.asarray(pose.pivot_xy_m)
+
+        assert rings[0] == pytest.approx(terminal_outline)
+        assert directions[0] == pytest.approx((0.0, -1.0))
+        assert directions[_CHUTE_JOINT_SEGMENTS] == pytest.approx(chute_direction)
+        assert directions[_CHUTE_JOINT_SEGMENTS:] == pytest.approx(
+            np.tile(chute_direction, (len(rings) - _CHUTE_JOINT_SEGMENTS, 1))
         )
-        assert distances == pytest.approx(reference_distances)
+        assert centers[0, :2] == pytest.approx(pivot + (0.0, joint_length_m / 2.0))
+        assert centers[_CHUTE_JOINT_SEGMENTS, :2] == pytest.approx(
+            pivot + chute_direction * joint_length_m / 2.0
+        )
+        straight_join = (
+            centers[tip_start_index, :2] - centers[_CHUTE_JOINT_SEGMENTS, :2]
+        )
+        straight_join /= np.linalg.norm(straight_join)
+        assert straight_join == pytest.approx(chute_direction)
+        assert centers[-1, :2] == pytest.approx(pose.outlet_xy_m)
+
+        deck_heights = np.mean(rings[:, [4, 5], 2], axis=1)
+        assert deck_heights[: tip_start_index + 1] == pytest.approx(
+            np.full(tip_start_index + 1, deck_heights[0])
+        )
+        assert np.all(np.diff(deck_heights[tip_start_index:]) < 0.0)
+        assert deck_heights[0] - deck_heights[-1] == pytest.approx(machine.tip_drop_m)
+        widths = np.linalg.norm(rings[:, 1] - rings[:, 0], axis=1)
+        assert widths[: tip_start_index + 1] == pytest.approx(
+            np.full(tip_start_index + 1, machine.conveyor_width_m)
+        )
+        assert widths[-1] == pytest.approx(machine.outlet_width_m)
+
+        faces = mesh.faces.reshape(-1, 5)
+        assert all(
+            max(int(index) // 8 for index in face[1:])
+            - min(int(index) // 8 for index in face[1:])
+            == 1
+            for face in faces
+        )
+        cross_section_edges = {
+            tuple(sorted((int(face[1]) % 8, int(face[2]) % 8))) for face in faces
+        }
+        assert (3, 6) not in cross_section_edges
+        _assert_transition_does_not_fold(rings)
 
 
 def test_chute_reaches_nondefault_inlets_with_continuous_radius() -> None:

@@ -1,4 +1,6 @@
 import { LatestTargetPresentation, type DecodedVisualFrame } from "./presentation.js";
+import { ForegroundVisualStream, shouldMaintainVisualStream } from "./foreground.js";
+import { cameraBitmapOptions } from "./bitmap.js";
 import { decodeVisualFrame, parseVisualStreamDescriptor, type SharedStats, type VisualStreamDescriptor } from "./protocol.js";
 import { ScrapScene } from "./scene.js";
 
@@ -48,7 +50,6 @@ function displaySharedStats(stats: SharedStats): void {
   const values: Record<string, string> = {
     "cycle-value": String(stats.cycle_index + 1),
     "phase-value": stats.phase === "filling" ? "적재" : "수거",
-    "target-fill-value": formatPercent(stats.target_fill_ratio),
     "surface-fill-value": formatPercent(stats.surface_fill_ratio),
     "volume-value": stats.surface_volume_m3.toFixed(1),
     "inlet-value": stats.current_inlet_index === null ? "없음" : String(stats.current_inlet_index + 1),
@@ -154,7 +155,6 @@ function start(): void {
   let descriptor: VisualStreamDescriptor | undefined;
   let scene: ScrapScene | undefined;
   let renderQueued = false;
-  let reconnectDelayMs = 250;
   let streamGeneration = 0;
 
   const render = (): void => {
@@ -163,7 +163,7 @@ function start(): void {
     if (paired === undefined || scene === undefined) {
       return;
     }
-    scene.updateHeights(paired.frame.heights);
+    scene.updateHeights(paired.frame.heights, paired.frame.metadata.shared);
     scene.render();
     painter.paint(paired.image);
     metrics.presentedTarget = paired.frame.metadata.target_id;
@@ -189,10 +189,13 @@ function start(): void {
       return;
     }
     try {
-      const heightCount = descriptor.model.surface.x_coordinates_m.length * descriptor.model.surface.y_coordinates_m.length;
+      const heightCount = descriptor.model.surface_grid.x_coordinates_m.length * descriptor.model.surface_grid.y_coordinates_m.length;
       const frame = decodeVisualFrame(packet, heightCount);
       metrics.receivedTarget = Math.max(metrics.receivedTarget, frame.metadata.target_id);
-      const image = await createImageBitmap(new Blob([frame.jpeg.buffer as ArrayBuffer], { type: "image/jpeg" }));
+      const image = await createImageBitmap(
+        new Blob([frame.jpeg.buffer as ArrayBuffer], { type: "image/jpeg" }),
+        cameraBitmapOptions(cameraCanvas),
+      );
       if (generation !== streamGeneration) {
         image.close();
         return;
@@ -208,14 +211,34 @@ function start(): void {
       void decodeLatest().catch(() => undefined);
     }
   };
-  const connect = (): void => {
+  const isForeground = (): boolean => shouldMaintainVisualStream(
+    document.visibilityState,
+    document.hasFocus(),
+  );
+  const resetStream = (): void => {
+    latest.reset();
+    pendingPacket = undefined;
+    descriptor = undefined;
+    scene?.dispose();
+    scene = undefined;
+    streamGeneration += 1;
+  };
+  let foregroundStream: ForegroundVisualStream<WebSocket>;
+  const openSocket = (): WebSocket => {
     const socket = new WebSocket(streamUrl());
     socket.binaryType = "arraybuffer";
     socket.onmessage = (event: MessageEvent<string | ArrayBuffer>) => {
+      if (!foregroundStream.isCurrent(socket)) {
+        return;
+      }
       if (typeof event.data === "string") {
         try {
-          descriptor = parseVisualStreamDescriptor(JSON.parse(event.data));
-          scene = new ScrapScene(modelCanvas, descriptor.model);
+          const nextDescriptor = parseVisualStreamDescriptor(JSON.parse(event.data));
+          const nextScene = new ScrapScene(modelCanvas, nextDescriptor.model);
+          scene?.dispose();
+          descriptor = nextDescriptor;
+          scene = nextScene;
+          foregroundStream.markAccepted(socket);
         } catch (error) {
           socket.close(1002, String(error));
         }
@@ -225,21 +248,40 @@ function start(): void {
       exposedMetrics.record("received");
       void decodeLatest().catch(() => undefined);
     };
-    socket.onopen = () => {
-      reconnectDelayMs = 250;
+    socket.onclose = (event: CloseEvent) => {
+      foregroundStream.markClosed(socket, event.code);
     };
-    socket.onclose = () => {
-      latest.reset();
-      pendingPacket = undefined;
-      streamGeneration += 1;
-      metrics.reconnects += 1;
-      const delay = reconnectDelayMs;
-      reconnectDelayMs = Math.min(reconnectDelayMs * 2, 5_000);
-      window.setTimeout(connect, delay);
+    socket.onerror = () => {
+      if (foregroundStream.isCurrent(socket)) {
+        socket.close();
+      }
     };
-    socket.onerror = () => socket.close();
+    return socket;
   };
-  connect();
+  foregroundStream = new ForegroundVisualStream(
+    {
+      open: openSocket,
+      close: (socket) => socket.close(1000, "visual page left the foreground"),
+      resetStream,
+      recordReconnect: () => {
+        metrics.reconnects += 1;
+      },
+    },
+    {
+      schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      cancel: (handle) => window.clearTimeout(handle as number),
+    },
+  );
+  const syncForeground = (): void => {
+    foregroundStream.setForeground(isForeground());
+  };
+  const leaveForeground = (): void => foregroundStream.setForeground(false);
+  document.addEventListener("visibilitychange", syncForeground);
+  window.addEventListener("focus", syncForeground);
+  window.addEventListener("blur", leaveForeground);
+  window.addEventListener("pageshow", syncForeground);
+  window.addEventListener("pagehide", leaveForeground);
+  syncForeground();
 }
 
 start();

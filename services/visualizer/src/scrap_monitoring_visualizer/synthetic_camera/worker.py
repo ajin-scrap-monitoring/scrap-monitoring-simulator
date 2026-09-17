@@ -115,11 +115,15 @@ class LatestSyntheticRenderWorker:
     def is_alive(self) -> bool:
         return self._process.is_alive()
 
-    def submit(self, request: CameraRenderRequest) -> None:
+    def submit(self, request: CameraRenderRequest) -> int | None:
+        replaced_target_id = (
+            self._pending[1].frame.target_id if self._pending is not None else None
+        )
         if self._pending is not None:
             self.replaced_pending += 1
         self._pending = (self._generation, request)
         self._flush_pending()
+        return replaced_target_id
 
     def _flush_pending(self) -> None:
         if self._pending is None or self._inflight:

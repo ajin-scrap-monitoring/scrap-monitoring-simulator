@@ -35,7 +35,7 @@ class CameraWorker(Protocol):
 
     def start(self) -> None: ...
 
-    def submit(self, request: CameraRenderRequest) -> None: ...
+    def submit(self, request: CameraRenderRequest) -> int | None: ...
 
     def invalidate(self) -> None: ...
 
@@ -118,9 +118,11 @@ class SyntheticCameraPipeline:
     def _submit(self, header: SceneDefinition, frame: InterpolatedFrame) -> None:
         if frame.target_id <= self._last_submitted_target_id:
             return
-        self._worker.submit(
+        replaced_target_id = self._worker.submit(
             CameraRenderRequest(header=header, frame=frame, config=self.config)
         )
+        if replaced_target_id is not None:
+            self._frames_by_target.pop(replaced_target_id, None)
         self._frames_by_target[frame.target_id] = frame
         self._last_submitted_target_id = frame.target_id
         self._submitted_frames += 1
@@ -240,6 +242,7 @@ class SyntheticCameraPipeline:
         self._last_segment_sequence = segment.sequence
 
     def _publish(self, outcome: CameraRenderOutcome, published_at: float) -> None:
+        frame = self._frames_by_target.pop(outcome.target_id, None)
         if outcome.error is not None or outcome.jpeg is None:
             self._last_error = outcome.error or "camera renderer returned no frame"
             self.store.clear()
@@ -250,7 +253,6 @@ class SyntheticCameraPipeline:
             elapsed_s=outcome.elapsed_s,
             render_backend=outcome.render_backend or "unknown",
         )
-        frame = self._frames_by_target.pop(outcome.target_id, None)
         if frame is not None and self._on_published is not None:
             self._on_published(frame, outcome.jpeg)
         self._rendered_frames += 1

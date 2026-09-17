@@ -1,17 +1,44 @@
+export type Point2 = readonly [number, number];
+export type Point3 = readonly [number, number, number];
+export type Triangle = readonly [number, number, number];
+export type Edge = readonly [number, number];
+
+export interface MaterialDescriptor {
+  color: readonly [number, number, number];
+  metallic: number;
+  roughness: number;
+}
+
+export interface MeshDescriptor {
+  vertices_m: readonly Point3[];
+  faces: readonly Triangle[];
+}
+
+export interface SurfaceTopologyDescriptor {
+  vertices_xy_m: readonly Point2[];
+  faces: readonly Triangle[];
+  boundary_edges: readonly Edge[];
+}
+
 export interface SceneModelDescriptor {
   boundary_xy_m: readonly [number, number][];
   floor_z_m: number;
   top_z_m: number;
   inlet_positions_xy_m: readonly [number, number][];
-  surface: {
+  surface_grid: {
     x_coordinates_m: readonly number[];
     y_coordinates_m: readonly number[];
   };
-  palette: {
-    background: readonly number[];
-    wall: readonly number[];
-    scrap: readonly number[];
-    guide: readonly number[];
+  topology: {
+    floor: MeshDescriptor;
+    walls: MeshDescriptor;
+    surface: SurfaceTopologyDescriptor;
+  };
+  background_color: readonly [number, number, number];
+  materials: {
+    floor: MaterialDescriptor;
+    wall: MaterialDescriptor;
+    scrap: MaterialDescriptor;
   };
 }
 
@@ -113,13 +140,17 @@ export function parseVisualStreamDescriptor(value: unknown): VisualStreamDescrip
     throw new Error("unsupported visual stream descriptor");
   }
   const model = asRecord(source.model, "descriptor.model");
-  const surface = asRecord(model.surface, "descriptor.model.surface");
+  const surfaceGrid = asRecord(model.surface_grid, "descriptor.model.surface_grid");
   const coordinates = (key: string): number[] => {
-    const value = surface[key];
+    const value = surfaceGrid[key];
     if (!Array.isArray(value) || value.length < 2) {
-      throw new Error(`descriptor.model.surface.${key} must have at least two entries`);
+      throw new Error(`descriptor.model.surface_grid.${key} must have at least two entries`);
     }
-    return value.map((entry, index) => finiteNumber(entry, `descriptor.model.surface.${key}[${index}]`));
+    const result = value.map((entry, index) => finiteNumber(entry, `descriptor.model.surface_grid.${key}[${index}]`));
+    if (result.some((entry, index) => index > 0 && entry <= (result[index - 1] ?? entry))) {
+      throw new Error(`descriptor.model.surface_grid.${key} must be strictly increasing`);
+    }
+    return result;
   };
   const pairs = (key: string, minLength: number): [number, number][] => {
     const value = model[key];
@@ -138,19 +169,103 @@ export function parseVisualStreamDescriptor(value: unknown): VisualStreamDescrip
   if (topZ <= floorZ) {
     throw new Error("descriptor.model.top_z_m must be above floor_z_m");
   }
-  const paletteSource = asRecord(model.palette, "descriptor.model.palette");
-  const color = (key: string): number[] => {
-    const value = paletteSource[key];
+  const color = (value: unknown, label: string): [number, number, number] => {
     if (!Array.isArray(value) || value.length !== 3) {
-      throw new Error(`descriptor.model.palette.${key} must be an RGB triplet`);
+      throw new Error(`${label} must be an RGB triplet`);
     }
     return value.map((entry, index) => {
-      const component = finiteNumber(entry, `descriptor.model.palette.${key}[${index}]`);
+      const component = finiteNumber(entry, `${label}[${index}]`);
       if (component < 0 || component > 1) {
-        throw new Error(`descriptor.model.palette.${key}[${index}] must be in [0, 1]`);
+        throw new Error(`${label}[${index}] must be in [0, 1]`);
       }
       return component;
+    }) as [number, number, number];
+  };
+  const pairList = (value: unknown, label: string, minLength: number): [number, number][] => {
+    if (!Array.isArray(value) || value.length < minLength) {
+      throw new Error(`${label} is invalid`);
+    }
+    return value.map((entry, index) => {
+      if (!Array.isArray(entry) || entry.length !== 2) {
+        throw new Error(`${label}[${index}] is invalid`);
+      }
+      return [finiteNumber(entry[0], `${label}[${index}][0]`), finiteNumber(entry[1], `${label}[${index}][1]`)] as [number, number];
     });
+  };
+  const indexList = <T extends 2 | 3>(
+    value: unknown,
+    label: string,
+    width: T,
+    vertexCount: number,
+  ): (T extends 2 ? Edge[] : Triangle[]) => {
+    if (!Array.isArray(value)) {
+      throw new Error(`${label} must be an array`);
+    }
+    return value.map((entry, entryIndex) => {
+      if (!Array.isArray(entry) || entry.length !== width) {
+        throw new Error(`${label}[${entryIndex}] is invalid`);
+      }
+      return entry.map((component, componentIndex) => {
+        const index = nonNegativeInteger(component, `${label}[${entryIndex}][${componentIndex}]`);
+        if (index >= vertexCount) {
+          throw new Error(`${label}[${entryIndex}][${componentIndex}] exceeds the vertex count`);
+        }
+        return index;
+      });
+    }) as unknown as T extends 2 ? Edge[] : Triangle[];
+  };
+  const mesh = (value: unknown, label: string): MeshDescriptor => {
+    const source = asRecord(value, label);
+    if (!Array.isArray(source.vertices_m) || source.vertices_m.length < 3) {
+      throw new Error(`${label}.vertices_m is invalid`);
+    }
+    const vertices = source.vertices_m.map((entry, index) => {
+      if (!Array.isArray(entry) || entry.length !== 3) {
+        throw new Error(`${label}.vertices_m[${index}] is invalid`);
+      }
+      return entry.map((component, componentIndex) => finiteNumber(component, `${label}.vertices_m[${index}][${componentIndex}]`)) as [number, number, number];
+    });
+    const faces = indexList(source.faces, `${label}.faces`, 3, vertices.length);
+    if (faces.length < 1) {
+      throw new Error(`${label}.faces must not be empty`);
+    }
+    return { vertices_m: vertices, faces };
+  };
+  const topology = asRecord(model.topology, "descriptor.model.topology");
+  const surfaceTopology = asRecord(topology.surface, "descriptor.model.topology.surface");
+  const surfaceVertices = pairList(
+    surfaceTopology.vertices_xy_m,
+    "descriptor.model.topology.surface.vertices_xy_m",
+    3,
+  );
+  const surfaceFaces = indexList(
+    surfaceTopology.faces,
+    "descriptor.model.topology.surface.faces",
+    3,
+    surfaceVertices.length,
+  );
+  if (surfaceFaces.length < 1) {
+    throw new Error("descriptor.model.topology.surface.faces must not be empty");
+  }
+  const boundaryEdges = indexList(
+    surfaceTopology.boundary_edges,
+    "descriptor.model.topology.surface.boundary_edges",
+    2,
+    surfaceVertices.length,
+  );
+  if (boundaryEdges.length < 3) {
+    throw new Error("descriptor.model.topology.surface.boundary_edges must contain at least three edges");
+  }
+  const materialsSource = asRecord(model.materials, "descriptor.model.materials");
+  const material = (key: string): MaterialDescriptor => {
+    const source = asRecord(materialsSource[key], `descriptor.model.materials.${key}`);
+    const metallic = unitInterval(source.metallic, `descriptor.model.materials.${key}.metallic`);
+    const roughness = unitInterval(source.roughness, `descriptor.model.materials.${key}.roughness`);
+    return {
+      color: color(source.color, `descriptor.model.materials.${key}.color`),
+      metallic,
+      roughness,
+    };
   };
   return {
     type: "visual_stream_descriptor",
@@ -161,15 +276,24 @@ export function parseVisualStreamDescriptor(value: unknown): VisualStreamDescrip
       floor_z_m: floorZ,
       top_z_m: topZ,
       inlet_positions_xy_m: pairs("inlet_positions_xy_m", 1),
-      surface: {
+      surface_grid: {
         x_coordinates_m: coordinates("x_coordinates_m"),
         y_coordinates_m: coordinates("y_coordinates_m"),
       },
-      palette: {
-        background: color("background"),
-        wall: color("wall"),
-        scrap: color("scrap"),
-        guide: color("guide"),
+      topology: {
+        floor: mesh(topology.floor, "descriptor.model.topology.floor"),
+        walls: mesh(topology.walls, "descriptor.model.topology.walls"),
+        surface: {
+          vertices_xy_m: surfaceVertices,
+          faces: surfaceFaces,
+          boundary_edges: boundaryEdges,
+        },
+      },
+      background_color: color(model.background_color, "descriptor.model.background_color"),
+      materials: {
+        floor: material("floor"),
+        wall: material("wall"),
+        scrap: material("scrap"),
       },
     },
   };

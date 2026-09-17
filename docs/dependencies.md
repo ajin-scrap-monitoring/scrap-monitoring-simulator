@@ -2,7 +2,7 @@
 
 ## 직접 의존성
 
-Repository가 직접 선택한 의존성은 다음 5개 묶음, 49개 표 항목이다. Service별 표에서 같은
+Repository가 직접 선택한 의존성은 다음 5개 묶음, 50개 표 항목이다. Service별 표에서 같은
 toolchain을 각각 사용하는 경우에는 각 service 항목으로 센다.
 
 | 묶음 | 항목 수 |
@@ -10,7 +10,7 @@ toolchain을 각각 사용하는 경우에는 각 service 항목으로 센다.
 | Simulation server | 11 |
 | Visualizer runtime | 15 |
 | Camera edge bridge | 6 |
-| Package build와 검증 | 8 |
+| Package build와 검증 | 9 |
 | GitHub Actions와 image build | 9 |
 
 ### Simulation server
@@ -76,6 +76,7 @@ Tungstenite는 default feature와 TLS feature를 끄고 handshake feature만 사
 | `types-jsonschema` | 4.26.0.20260518 | jsonschema 정적 type 정보 | [typeshed](https://github.com/python/typeshed) | Apache-2.0 |
 | `cargo-about` | 0.9.2 | Rust crate 라이선스 검사와 notice 생성 | [crates.io](https://crates.io/crates/cargo-about/0.9.2) | Apache-2.0 OR MIT |
 | actionlint | 1.7.12 | GitHub Actions workflow 문법 검사 | [GitHub](https://github.com/rhysd/actionlint) | MIT |
+| `jq` | 1.6 이상 | Compose JSON 구조와 LiDAR port 계약 검사 | [jqlang](https://github.com/jqlang/jq) | MIT |
 
 ### GitHub Actions와 image build
 

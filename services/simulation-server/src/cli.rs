@@ -33,13 +33,13 @@ enum Command {
         #[arg(
             long,
             env = "SCRAP_SIMULATOR_LIDAR_1_BIND",
-            default_value = "0.0.0.0:8089"
+            default_value = "127.0.0.2:8089"
         )]
         lidar_1_bind: SocketAddr,
         #[arg(
             long,
             env = "SCRAP_SIMULATOR_LIDAR_2_BIND",
-            default_value = "0.0.0.0:8090"
+            default_value = "127.0.0.3:8089"
         )]
         lidar_2_bind: SocketAddr,
         #[arg(long, env = "SCRAP_SIMULATOR_SCENE_HOST", default_value = "visualizer")]
@@ -122,5 +122,20 @@ mod tests {
             panic!("expected run command");
         };
         assert_eq!(mean_fill_duration_s, Some(600.0));
+    }
+
+    #[test]
+    fn run_defaults_to_distinct_loopback_hosts_on_the_s2e_port() {
+        let cli = Cli::try_parse_from(["scrap-monitoring-simulation-server", "run"]).unwrap();
+        let Command::Run {
+            lidar_1_bind,
+            lidar_2_bind,
+            ..
+        } = cli.command
+        else {
+            panic!("expected run command");
+        };
+        assert_eq!(lidar_1_bind, "127.0.0.2:8089".parse().unwrap());
+        assert_eq!(lidar_2_bind, "127.0.0.3:8089".parse().unwrap());
     }
 }

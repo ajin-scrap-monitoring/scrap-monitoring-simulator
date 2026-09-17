@@ -12,8 +12,10 @@ from threading import Lock
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from scrap_monitoring_visualizer.contracts.models import SceneDefinition
+from scrap_monitoring_visualizer.geometry import Mesh, build_scene_geometry_topology
 from scrap_monitoring_visualizer.synthetic_camera.models import (
     InterpolatedFrame,
+    MaterialConfig,
     SyntheticCameraConfig,
 )
 
@@ -81,6 +83,18 @@ def _descriptor(
     definition: SceneDefinition, camera_config: SyntheticCameraConfig
 ) -> dict[str, object]:
     scene = definition.scene
+    topology = build_scene_geometry_topology(definition)
+
+    def mesh_descriptor(mesh: Mesh) -> dict[str, object]:
+        return {"vertices_m": mesh.vertices, "faces": mesh.faces}
+
+    def material_descriptor(material: MaterialConfig) -> dict[str, object]:
+        return {
+            "color": material.color,
+            "metallic": material.metallic,
+            "roughness": material.roughness,
+        }
+
     return {
         "type": "visual_stream_descriptor",
         "version": 1,
@@ -90,15 +104,24 @@ def _descriptor(
             "floor_z_m": scene.floor_z_m,
             "top_z_m": scene.top_z_m,
             "inlet_positions_xy_m": scene.inlet_positions_xy_m,
-            "surface": {
+            "surface_grid": {
                 "x_coordinates_m": scene.surface.x_coordinates_m,
                 "y_coordinates_m": scene.surface.y_coordinates_m,
             },
-            "palette": {
-                "background": camera_config.background_color,
-                "wall": camera_config.wall_material.color,
-                "scrap": camera_config.scrap_material.color,
-                "guide": camera_config.chute_material.color,
+            "topology": {
+                "floor": mesh_descriptor(topology.floor),
+                "walls": mesh_descriptor(topology.walls),
+                "surface": {
+                    "vertices_xy_m": topology.surface_xy,
+                    "faces": topology.surface_faces,
+                    "boundary_edges": topology.surface_boundary_edges,
+                },
+            },
+            "background_color": camera_config.background_color,
+            "materials": {
+                "floor": material_descriptor(camera_config.floor_material),
+                "wall": material_descriptor(camera_config.wall_material),
+                "scrap": material_descriptor(camera_config.scrap_material),
             },
         },
     }
@@ -189,6 +212,16 @@ def install_visual_routes(
                 sent_target_id: int | None = None
                 next_poll_at = loop.time()
                 while True:
+                    current_definition = definition_provider()
+                    if (
+                        current_definition is None
+                        or current_definition.run_id != definition.run_id
+                    ):
+                        await websocket.close(
+                            code=1012,
+                            reason="visual source changed",
+                        )
+                        return
                     snapshot = store.get()
                     if snapshot is not None and snapshot.target_id != sent_target_id:
                         async with asyncio.timeout(1.0):

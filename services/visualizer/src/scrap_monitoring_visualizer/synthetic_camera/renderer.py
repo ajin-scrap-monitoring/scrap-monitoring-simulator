@@ -59,6 +59,7 @@ class ChutePose:
 
 _GEOMETRY_EPSILON = 1e-9
 _MAX_CHUTE_TIP_ANGLE_RAD = math.radians(20.0)
+_CHUTE_JOINT_SEGMENTS = 6
 _CHUTE_TIP_SEGMENTS = 4
 
 
@@ -281,10 +282,19 @@ def _smoothstep(alpha: float) -> float:
     return alpha * alpha * (3.0 - 2.0 * alpha)
 
 
-def _joint_overlap_m(machine: MachineConfig) -> float:
+def _joint_length_m(
+    header: SceneDefinition,
+    machine: MachineConfig,
+) -> float:
+    pivot = np.asarray(_chute_pivot(header, machine), dtype=np.float64)
+    minimum_radius = min(
+        float(np.linalg.norm(np.asarray(inlet, dtype=np.float64) - pivot))
+        for inlet in header.scene.inlet_positions_xy_m
+    )
     return min(
-        machine.conveyor_width_m * 0.12,
-        machine.conveyor_length_m * 0.1,
+        machine.conveyor_width_m * 1.25,
+        machine.conveyor_length_m * 0.75,
+        minimum_radius * machine.tip_fraction * 1.5,
     )
 
 
@@ -361,7 +371,7 @@ def _fixed_conveyor_poly_data(
         machine.conveyor_width_m * 0.06,
         machine.conveyor_body_height_m / 2.0,
     )
-    overlap_m = _joint_overlap_m(machine)
+    joint_length_m = _joint_length_m(header, machine)
 
     def body_point(
         longitudinal_m: float,
@@ -397,14 +407,14 @@ def _fixed_conveyor_poly_data(
         )
 
     base = box_points(
-        overlap_m / 2.0,
+        -joint_length_m / 2.0,
         -machine.conveyor_length_m,
         -half_width,
         half_width,
         lower_z,
         deck_z,
     )
-    rail_downstream_m = -overlap_m / 2.0
+    rail_downstream_m = -joint_length_m / 2.0
     left_rail = box_points(
         rail_downstream_m,
         -machine.conveyor_length_m,
@@ -423,45 +433,31 @@ def _fixed_conveyor_poly_data(
     )
     points = np.concatenate((base, left_rail, right_rail))
     faces = np.concatenate(
-        tuple(_closed_hexahedron_faces(8 * index) for index in range(3))
+        tuple(
+            _closed_hexahedron_faces(8 * index, close_downstream=False)
+            for index in range(3)
+        )
     )
     return pv.PolyData(points, faces)
 
 
-def _closed_hexahedron_faces(point_offset: int = 0) -> np.ndarray:
+def _closed_hexahedron_faces(
+    point_offset: int = 0,
+    *,
+    close_downstream: bool = True,
+) -> np.ndarray:
+    quads = [
+        (0, 3, 2, 1),
+        (4, 5, 6, 7),
+        (0, 1, 5, 4),
+        (1, 2, 6, 5),
+        (2, 3, 7, 6),
+        (3, 0, 4, 7),
+    ]
+    if not close_downstream:
+        del quads[2]
     faces = np.asarray(
-        (
-            4,
-            0,
-            3,
-            2,
-            1,
-            4,
-            4,
-            5,
-            6,
-            7,
-            4,
-            0,
-            1,
-            5,
-            4,
-            4,
-            1,
-            2,
-            6,
-            5,
-            4,
-            2,
-            3,
-            7,
-            6,
-            4,
-            3,
-            0,
-            4,
-            7,
-        ),
+        [value for quad in quads for value in (4, *quad)],
         dtype=np.int64,
     )
     indexed_faces = faces.reshape(-1, 5)
@@ -488,35 +484,62 @@ def _chute_poly_data(
     if math.atan2(machine.tip_drop_m, tip_run) > _MAX_CHUTE_TIP_ANGLE_RAD:
         raise ValueError("chute tip angle exceeds 20 degrees")
 
-    def world_point(
-        longitudinal_m: float,
-        lateral_m: float,
-        z_m: float,
-    ) -> tuple[float, float, float]:
-        return (
-            pivot_x + longitudinal_m * cosine - lateral_m * sine,
-            pivot_y + longitudinal_m * sine + lateral_m * cosine,
-            z_m,
+    joint_length_m = _joint_length_m(header, machine)
+    tip_start_m = radius * machine.tip_fraction
+    if tip_start_m <= joint_length_m / 2.0:
+        raise ValueError("chute joint leaves no straight section before the tip")
+
+    pivot = np.asarray((pivot_x, pivot_y), dtype=np.float64)
+    fixed_direction = np.asarray((0.0, -1.0), dtype=np.float64)
+    chute_direction = np.asarray((cosine, sine), dtype=np.float64)
+    joint_start = pivot - fixed_direction * joint_length_m / 2.0
+    joint_end = pivot + chute_direction * joint_length_m / 2.0
+    start_tangent = fixed_direction * joint_length_m
+    end_tangent = chute_direction * joint_length_m
+    rings: list[tuple[np.ndarray, np.ndarray, float, float]] = []
+    for joint_index in range(_CHUTE_JOINT_SEGMENTS + 1):
+        alpha = joint_index / _CHUTE_JOINT_SEGMENTS
+        alpha_squared = alpha * alpha
+        alpha_cubed = alpha_squared * alpha
+        center = (
+            (2.0 * alpha_cubed - 3.0 * alpha_squared + 1.0) * joint_start
+            + (alpha_cubed - 2.0 * alpha_squared + alpha) * start_tangent
+            + (-2.0 * alpha_cubed + 3.0 * alpha_squared) * joint_end
+            + (alpha_cubed - alpha_squared) * end_tangent
+        )
+        tangent = (
+            (6.0 * alpha_squared - 6.0 * alpha) * joint_start
+            + (3.0 * alpha_squared - 4.0 * alpha + 1.0) * start_tangent
+            + (-6.0 * alpha_squared + 6.0 * alpha) * joint_end
+            + (3.0 * alpha_squared - 2.0 * alpha) * end_tangent
+        )
+        tangent_length = float(np.linalg.norm(tangent))
+        if tangent_length <= _GEOMETRY_EPSILON:
+            raise ValueError("chute joint tangent must be positive")
+        rings.append(
+            (
+                center,
+                tangent / tangent_length,
+                center_z,
+                machine.conveyor_width_m,
+            )
         )
 
-    overlap_m = _joint_overlap_m(machine)
-    socket_clearance_m = min(
-        machine.conveyor_width_m * 0.02,
-        machine.conveyor_body_height_m * 0.1,
+    rings.append(
+        (
+            pivot + chute_direction * tip_start_m,
+            chute_direction,
+            center_z,
+            machine.conveyor_width_m,
+        )
     )
-    socket_width_m = machine.conveyor_width_m + 2.0 * socket_clearance_m
-    tip_start_m = radius * machine.tip_fraction
-    stations = [
-        (-overlap_m, center_z, socket_width_m),
-        (0.0, center_z, machine.conveyor_width_m),
-        (tip_start_m, center_z, machine.conveyor_width_m),
-    ]
     for tip_index in range(1, _CHUTE_TIP_SEGMENTS + 1):
         tip_alpha = tip_index / _CHUTE_TIP_SEGMENTS
         eased_tip_alpha = _smoothstep(tip_alpha)
-        stations.append(
+        rings.append(
             (
-                tip_start_m + tip_run * tip_alpha,
+                pivot + chute_direction * (tip_start_m + tip_run * tip_alpha),
+                chute_direction,
                 center_z - machine.tip_drop_m * eased_tip_alpha,
                 machine.conveyor_width_m
                 + (machine.outlet_width_m - machine.conveyor_width_m) * eased_tip_alpha,
@@ -530,8 +553,12 @@ def _chute_poly_data(
     )
     points = np.asarray(
         [
-            world_point(longitudinal_m, lateral_m, station_z + vertical_m)
-            for longitudinal_m, station_z, width_m in stations
+            (
+                center[0] - direction[1] * lateral_m,
+                center[1] + direction[0] * lateral_m,
+                station_z + vertical_m,
+            )
+            for center, direction, station_z, width_m in rings
             for lateral_m, vertical_m in (
                 (-width_m / 2.0, -half_body_height_m),
                 (width_m / 2.0, -half_body_height_m),
@@ -548,7 +575,7 @@ def _chute_poly_data(
     faces = np.asarray(
         [
             value
-            for ring_index in range(len(stations) - 1)
+            for ring_index in range(len(rings) - 1)
             for edge_index in range(8)
             for value in (
                 4,
@@ -835,7 +862,7 @@ class VtkPbrRenderer:
             or self._config != config
         )
         if initialize:
-            topology = build_scene_geometry_topology(header, frame)
+            topology = build_scene_geometry_topology(header)
         assert topology is not None
         geometry = topology.materialize(frame)
         if initialize or not self._update_scene(frame, geometry, interpolation):
