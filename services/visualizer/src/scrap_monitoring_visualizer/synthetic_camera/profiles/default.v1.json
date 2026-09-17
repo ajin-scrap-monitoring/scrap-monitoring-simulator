@@ -4,8 +4,8 @@
   "video": {
     "width": 1920,
     "height": 1080,
-    "raster_width": 640,
-    "raster_height": 360,
+    "raster_width": 576,
+    "raster_height": 324,
     "fps": 30,
     "jpeg_quality": 85,
     "max_frame_bytes": 4194304
