@@ -2,7 +2,7 @@
 
 ## 현재 구현 현황
 
-현재 `0.3.0` 구현은 6개 영역으로 구성한다.
+현재 `0.3.1` 구현은 6개 영역으로 구성한다.
 
 | 영역 | 현재 구현 | 검증 경계 |
 | --- | --- | --- |
@@ -15,7 +15,7 @@
 
 ## 수락과 release 순서
 
-`v0.3.0` release는 다음 5단계를 완료 조건으로 사용한다.
+`v0.3.1` release는 다음 5단계를 완료 조건으로 사용한다.
 
 1. `scripts/check.sh`로 static, AMD64, ARM64 Container build와 test를 완료한다.
 2. Server에서 health guard preflight를 통과한 release image로 Simulation server와 Visualizer를 실행한다.

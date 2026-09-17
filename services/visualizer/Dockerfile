@@ -17,7 +17,10 @@ RUN --mount=type=cache,id=scrap-visualizer-npm,target=/root/.npm,sharing=locked 
 
 COPY services/visualizer/web/ ./
 
-RUN npm test && npm run build
+RUN npm test \
+    && npm run build \
+    && test -s dist/assets/vendor/three.module.js \
+    && test -s dist/assets/vendor/three.core.js
 
 FROM ${PYTHON_IMAGE} AS system
 
@@ -108,7 +111,7 @@ COPY --chown=visualizer:visualizer services/visualizer/licenses/THIRD_PARTY_NOTI
     /workspace/visualizer/licenses/THIRD_PARTY_NOTICES.html
 
 ARG BUILD_REVISION=unknown
-ARG BUILD_VERSION=0.3.0
+ARG BUILD_VERSION=0.3.1
 
 LABEL org.opencontainers.image.description="Canonical scene browser and synthetic camera renderer" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \
