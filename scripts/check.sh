@@ -6,7 +6,7 @@ server_image="${SCRAP_SIMULATOR_TEST_SERVER_IMAGE:-scrap-monitoring-simulator-se
 visualizer_image="${SCRAP_SIMULATOR_TEST_VISUALIZER_IMAGE:-scrap-monitoring-simulator-visualizer:local}"
 edge_image="${SCRAP_SIMULATOR_TEST_EDGE_IMAGE:-scrap-monitoring-simulator-camera-edge-bridge:local}"
 build_revision="${BUILD_REVISION:-local}"
-build_version="${BUILD_VERSION:-0.3.2}"
+build_version="${BUILD_VERSION:-0.4.0}"
 edge_smoke_log="$(mktemp)"
 trap 'rm -f "$edge_smoke_log"' EXIT
 

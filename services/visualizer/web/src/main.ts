@@ -1,4 +1,7 @@
-import { LatestTargetPresentation, type DecodedVisualFrame } from "./presentation.js";
+import { VisualMetrics, type QueueDepths } from "./metrics.js";
+import { LatestPacketQueue, LatestTargetPresentation, type DecodedVisualFrame } from "./presentation.js";
+import { ForegroundVisualStream, shouldMaintainVisualStream } from "./foreground.js";
+import { cameraBitmapOptions } from "./bitmap.js";
 import { decodeVisualFrame, parseVisualStreamDescriptor, type SharedStats, type VisualStreamDescriptor } from "./protocol.js";
 import { ScrapScene } from "./scene.js";
 
@@ -48,7 +51,6 @@ function displaySharedStats(stats: SharedStats): void {
   const values: Record<string, string> = {
     "cycle-value": String(stats.cycle_index + 1),
     "phase-value": stats.phase === "filling" ? "적재" : "수거",
-    "target-fill-value": formatPercent(stats.target_fill_ratio),
     "surface-fill-value": formatPercent(stats.surface_fill_ratio),
     "volume-value": stats.surface_volume_m3.toFixed(1),
     "inlet-value": stats.current_inlet_index === null ? "없음" : String(stats.current_inlet_index + 1),
@@ -61,78 +63,12 @@ function displaySharedStats(stats: SharedStats): void {
   }
 }
 
-interface VisualMetrics {
-  presentedTarget: number;
-  receivedTarget: number;
-  reconnects: number;
-  receivedFrames: number;
-  presentedFrames: number;
-  decodeErrors: number;
-  targetMismatches: number;
-}
-
-interface QueueMetrics {
-  pendingDecode: number;
-  decodeInflight: number;
-  pendingPresent: number;
-}
-
-function exposeMetrics(
-  queueMetrics: () => QueueMetrics,
-): { metrics: VisualMetrics; record: (kind: "received" | "presented") => void } {
-  const metrics: VisualMetrics = {
-    presentedTarget: -1,
-    receivedTarget: -1,
-    reconnects: 0,
-    receivedFrames: 0,
-    presentedFrames: 0,
-    decodeErrors: 0,
-    targetMismatches: 0,
-  };
-  const windowMs = 5_000;
-  const received: number[] = [];
-  const presented: number[] = [];
-  const rate = (samples: number[], now: number): number => {
-    while (samples.length > 0 && (samples[0] ?? now) < now - windowMs) samples.shift();
-    if (samples.length < 2) return 0;
-    return (samples.length - 1) * 1_000 / ((samples[samples.length - 1] ?? now) - (samples[0] ?? now));
-  };
-  const record = (kind: "received" | "presented"): void => {
-    const now = performance.now();
-    const samples = kind === "received" ? received : presented;
-    samples.push(now);
-    if (kind === "received") metrics.receivedFrames += 1;
-    else metrics.presentedFrames += 1;
-  };
+function exposeMetrics(metrics: VisualMetrics, queueDepths: () => QueueDepths): void {
   const api = {
-    snapshot: () => {
-      const now = performance.now();
-      const receivedFps = rate(received, now);
-      return {
-        version: 1,
-        sampled_at_ms: now,
-        window_s: windowMs / 1_000,
-        source: { rendered_fps: receivedFps },
-        network: { received_frames: metrics.receivedFrames, received_fps: receivedFps },
-        browser: {
-          presented_frames: metrics.presentedFrames,
-          presented_fps: rate(presented, now),
-          dropped_before_decode: 0,
-          dropped_before_present: 0,
-          decode_errors: metrics.decodeErrors,
-          target_mismatches: metrics.targetMismatches,
-        },
-        queues: {
-          pending_decode: queueMetrics().pendingDecode,
-          decode_inflight: queueMetrics().decodeInflight,
-          pending_present: queueMetrics().pendingPresent,
-        },
-      };
-    },
+    snapshot: () => metrics.snapshot(queueDepths()),
   };
   Object.defineProperty(window, "__scrapVisualMetrics", { configurable: true, value: api });
   Object.defineProperty(window, "__scrapCameraMetrics", { configurable: true, value: api });
-  return { metrics, record };
 }
 
 function start(): void {
@@ -142,19 +78,21 @@ function start(): void {
     throw new Error("visual canvas is unavailable");
   }
   const painter = cameraPainter(cameraCanvas);
+  const pendingPackets = new LatestPacketQueue<ArrayBuffer>();
   const latest = new LatestTargetPresentation();
-  let pendingPacket: ArrayBuffer | undefined;
   let decodeInflight = false;
-  const exposedMetrics = exposeMetrics(() => ({
-    pendingDecode: pendingPacket === undefined ? 0 : 1,
+  const queueDepths = (): QueueDepths => ({
+    pendingDecode: pendingPackets.size,
     decodeInflight: decodeInflight ? 1 : 0,
-    pendingPresent: latest.pendingTargetId === undefined ? 0 : 1,
-  }));
-  const metrics = exposedMetrics.metrics;
+    pendingPresent: latest.size,
+  });
+  const metrics = new VisualMetrics();
+  const observeQueues = (): void => metrics.observeQueues(queueDepths());
+  exposeMetrics(metrics, queueDepths);
+  observeQueues();
   let descriptor: VisualStreamDescriptor | undefined;
   let scene: ScrapScene | undefined;
   let renderQueued = false;
-  let reconnectDelayMs = 250;
   let streamGeneration = 0;
 
   const render = (): void => {
@@ -163,11 +101,11 @@ function start(): void {
     if (paired === undefined || scene === undefined) {
       return;
     }
-    scene.updateHeights(paired.frame.heights);
+    scene.updateHeights(paired.frame.heights, paired.frame.metadata.shared);
     scene.render();
     painter.paint(paired.image);
-    metrics.presentedTarget = paired.frame.metadata.target_id;
-    exposedMetrics.record("presented");
+    metrics.recordPresented(paired.frame.metadata.target_id, paired.cameraTargetId);
+    observeQueues();
     displaySharedStats(paired.frame.metadata.shared);
   };
   const scheduleRender = (): void => {
@@ -177,69 +115,122 @@ function start(): void {
     }
   };
   const decodeLatest = async (): Promise<void> => {
-    if (decodeInflight || pendingPacket === undefined || descriptor === undefined) {
+    if (decodeInflight || pendingPackets.size === 0 || descriptor === undefined) {
       return;
     }
-    const packet = pendingPacket;
-    pendingPacket = undefined;
+    const packet = pendingPackets.take();
+    if (packet === undefined) {
+      return;
+    }
     const generation = streamGeneration;
+    const decodeStartedAtMs = performance.now();
     decodeInflight = true;
-    if (descriptor === undefined) {
-      decodeInflight = false;
-      return;
-    }
+    observeQueues();
     try {
-      const heightCount = descriptor.model.surface.x_coordinates_m.length * descriptor.model.surface.y_coordinates_m.length;
+      const heightCount = descriptor.model.surface_grid.x_coordinates_m.length * descriptor.model.surface_grid.y_coordinates_m.length;
       const frame = decodeVisualFrame(packet, heightCount);
-      metrics.receivedTarget = Math.max(metrics.receivedTarget, frame.metadata.target_id);
-      const image = await createImageBitmap(new Blob([frame.jpeg.buffer as ArrayBuffer], { type: "image/jpeg" }));
+      const image = await createImageBitmap(
+        new Blob([frame.jpeg.buffer as ArrayBuffer], { type: "image/jpeg" }),
+        cameraBitmapOptions(cameraCanvas),
+      );
+      metrics.recordDecoded(performance.now() - decodeStartedAtMs);
       if (generation !== streamGeneration) {
         image.close();
+        metrics.recordDroppedBeforePresent();
         return;
       }
-      const decoded: DecodedVisualFrame = { frame, image };
-      if (latest.offer(decoded)) {
+      const decoded: DecodedVisualFrame = {
+        frame,
+        image,
+        cameraTargetId: frame.metadata.target_id,
+      };
+      const result = latest.offer(decoded);
+      metrics.recordDroppedBeforePresent(result.droppedFrames);
+      observeQueues();
+      if (result.accepted) {
         scheduleRender();
       }
     } catch {
-      metrics.decodeErrors += 1;
+      metrics.recordDecodeError(performance.now() - decodeStartedAtMs);
     } finally {
       decodeInflight = false;
+      observeQueues();
       void decodeLatest().catch(() => undefined);
     }
   };
-  const connect = (): void => {
+  const isForeground = (): boolean => shouldMaintainVisualStream(
+    document.visibilityState,
+    document.hasFocus(),
+  );
+  const resetStream = (): void => {
+    metrics.recordDroppedBeforeDecode(pendingPackets.reset());
+    metrics.recordDroppedBeforePresent(latest.reset());
+    descriptor = undefined;
+    scene?.dispose();
+    scene = undefined;
+    streamGeneration += 1;
+    observeQueues();
+  };
+  let foregroundStream: ForegroundVisualStream<WebSocket>;
+  const openSocket = (): WebSocket => {
     const socket = new WebSocket(streamUrl());
     socket.binaryType = "arraybuffer";
     socket.onmessage = (event: MessageEvent<string | ArrayBuffer>) => {
+      if (!foregroundStream.isCurrent(socket)) {
+        return;
+      }
       if (typeof event.data === "string") {
         try {
-          descriptor = parseVisualStreamDescriptor(JSON.parse(event.data));
-          scene = new ScrapScene(modelCanvas, descriptor.model);
+          const nextDescriptor = parseVisualStreamDescriptor(JSON.parse(event.data));
+          const nextScene = new ScrapScene(modelCanvas, nextDescriptor.model);
+          scene?.dispose();
+          descriptor = nextDescriptor;
+          scene = nextScene;
+          foregroundStream.markAccepted(socket);
         } catch (error) {
           socket.close(1002, String(error));
         }
         return;
       }
-      pendingPacket = event.data;
-      exposedMetrics.record("received");
+      metrics.recordReceived();
+      metrics.recordDroppedBeforeDecode(pendingPackets.offer(event.data));
+      observeQueues();
       void decodeLatest().catch(() => undefined);
     };
-    socket.onopen = () => {
-      reconnectDelayMs = 250;
+    socket.onclose = (event: CloseEvent) => {
+      foregroundStream.markClosed(socket, event.code);
     };
-    socket.onclose = () => {
-      latest.reset();
-      pendingPacket = undefined;
-      streamGeneration += 1;
-      metrics.reconnects += 1;
-      const delay = reconnectDelayMs;
-      reconnectDelayMs = Math.min(reconnectDelayMs * 2, 5_000);
-      window.setTimeout(connect, delay);
+    socket.onerror = () => {
+      if (foregroundStream.isCurrent(socket)) {
+        socket.close();
+      }
     };
-    socket.onerror = () => socket.close();
+    return socket;
   };
-  connect();
+  foregroundStream = new ForegroundVisualStream(
+    {
+      open: openSocket,
+      close: (socket) => socket.close(1000, "visual page left the foreground"),
+      resetStream,
+      recordReconnect: () => {
+        metrics.recordReconnect();
+      },
+    },
+    {
+      schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      cancel: (handle) => window.clearTimeout(handle as number),
+    },
+  );
+  const syncForeground = (): void => {
+    foregroundStream.setForeground(isForeground());
+  };
+  const leaveForeground = (): void => foregroundStream.setForeground(false);
+  document.addEventListener("visibilitychange", syncForeground);
+  window.addEventListener("focus", syncForeground);
+  window.addEventListener("blur", leaveForeground);
+  window.addEventListener("pageshow", syncForeground);
+  window.addEventListener("pagehide", leaveForeground);
+  syncForeground();
 }
 
 start();

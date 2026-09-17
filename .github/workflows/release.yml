@@ -51,9 +51,11 @@ jobs:
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
           python3 - "$GITHUB_REF_NAME" <<'PY'
+          import json
           import re
           import sys
           import tomllib
+          from pathlib import Path
 
           tag = sys.argv[1]
           if re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag) is None:
@@ -93,6 +95,67 @@ jobs:
                   raise SystemExit(
                       f"{path} package {package_name} versions {versions} differ from {expected}"
                   )
+
+          web_manifest_path = "services/visualizer/web/package.json"
+          web_lock_path = "services/visualizer/web/package-lock.json"
+          with open(web_manifest_path, encoding="utf-8") as source:
+              web_manifest = json.load(source)
+          with open(web_lock_path, encoding="utf-8") as source:
+              web_lock = json.load(source)
+          json_versions = (
+              (web_manifest_path, "version", web_manifest["version"]),
+              (web_lock_path, "version", web_lock["version"]),
+              (web_lock_path, 'packages[""].version', web_lock["packages"][""]["version"]),
+          )
+          for path, field, observed in json_versions:
+              if observed != expected:
+                  raise SystemExit(
+                      f"{path} {field} {observed} differs from {expected}"
+                  )
+
+          def require_single_version(path, pattern, field):
+              matches = re.findall(pattern, Path(path).read_text(encoding="utf-8"))
+              if matches != [expected]:
+                  raise SystemExit(
+                      f"{path} {field} declarations {matches} differ from [{expected!r}]"
+                  )
+
+          dockerfiles = (
+              "services/simulation-server/Dockerfile",
+              "services/camera-edge-bridge/Dockerfile",
+              "services/visualizer/Dockerfile",
+          )
+          for path in dockerfiles:
+              require_single_version(
+                  path,
+                  r"(?m)^ARG[ \t]+BUILD_VERSION=([^\s#]+)[ \t]*$",
+                  "ARG BUILD_VERSION",
+              )
+
+          bake_path = "docker-bake.hcl"
+          bake_text = Path(bake_path).read_text(encoding="utf-8")
+          build_version_blocks = re.findall(
+              r'(?ms)^variable[ \t]+"BUILD_VERSION"[ \t]*\{(.*?)^\}',
+              bake_text,
+          )
+          if len(build_version_blocks) != 1:
+              raise SystemExit(
+                  f"{bake_path} has {len(build_version_blocks)} BUILD_VERSION variable blocks"
+              )
+          defaults = re.findall(
+              r'(?m)^[ \t]*default[ \t]*=[ \t]*"([^"\n]+)"[ \t]*$',
+              build_version_blocks[0],
+          )
+          if defaults != [expected]:
+              raise SystemExit(
+                  f"{bake_path} BUILD_VERSION defaults {defaults} differ from [{expected!r}]"
+              )
+
+          require_single_version(
+              "scripts/check.sh",
+              r'(?m)^build_version="\$\{BUILD_VERSION:-([^}\n]+)\}"[ \t]*$',
+              "BUILD_VERSION fallback",
+          )
           PY
           version="${GITHUB_REF_NAME#v}"
           repository_owner="${GITHUB_REPOSITORY_OWNER,,}"

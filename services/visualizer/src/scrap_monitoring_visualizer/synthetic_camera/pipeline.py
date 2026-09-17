@@ -33,13 +33,21 @@ class CameraWorker(Protocol):
     @property
     def is_alive(self) -> bool: ...
 
+    @property
+    def inflight(self) -> bool: ...
+
+    @property
+    def pending(self) -> bool: ...
+
     def start(self) -> None: ...
 
-    def submit(self, request: CameraRenderRequest) -> None: ...
+    def submit(self, request: CameraRenderRequest) -> int | None: ...
 
     def invalidate(self) -> None: ...
 
     def poll(self) -> CameraRenderOutcome | None: ...
+
+    async def wait(self) -> None: ...
 
     def close(self, timeout_s: float = 5.0) -> None: ...
 
@@ -84,12 +92,19 @@ class SyntheticCameraPipeline:
         self._next_frame_index = 0
         self._submitted_frames = 0
         self._rendered_frames = 0
-        self._rendered_at: deque[float] = deque()
+        self._published_frames = 0
+        self._source_rendered_at: deque[float] = deque()
+        self._published_at: deque[float] = deque()
         self._last_render_seconds: float | None = None
+        self._last_stage_seconds: dict[str, float] = {}
+        self._last_request_ipc_seconds: float | None = None
+        self._last_result_ipc_seconds: float | None = None
+        self._last_worker_idle_seconds: float | None = None
         self._last_mode: str | None = None
         self._last_reason: str | None = None
         self._last_error: str | None = None
         self._frames_by_target: dict[int, InterpolatedFrame] = {}
+        self._schedule_changed = asyncio.Event()
 
     def start(self) -> None:
         if self._closed:
@@ -112,15 +127,22 @@ class SyntheticCameraPipeline:
         self._last_reason = None
         self._last_error = None
         self._frames_by_target.clear()
-        self._rendered_at.clear()
+        self._source_rendered_at.clear()
+        self._published_at.clear()
         self._last_render_seconds = None
+        self._last_stage_seconds.clear()
+        self._last_request_ipc_seconds = None
+        self._last_result_ipc_seconds = None
+        self._last_worker_idle_seconds = None
 
     def _submit(self, header: SceneDefinition, frame: InterpolatedFrame) -> None:
         if frame.target_id <= self._last_submitted_target_id:
             return
-        self._worker.submit(
+        replaced_target_id = self._worker.submit(
             CameraRenderRequest(header=header, frame=frame, config=self.config)
         )
+        if replaced_target_id is not None:
+            self._frames_by_target.pop(replaced_target_id, None)
         self._frames_by_target[frame.target_id] = frame
         self._last_submitted_target_id = frame.target_id
         self._submitted_frames += 1
@@ -172,6 +194,7 @@ class SyntheticCameraPipeline:
     def state_changed(self, state: ExecutionState) -> None:
         if self._closed:
             return
+        self._schedule_changed.set()
         header = state.header
         run_id = header.run_id if header is not None else None
         if run_id != self._run_id:
@@ -182,6 +205,8 @@ class SyntheticCameraPipeline:
             self._frames_by_target.clear()
             self._segment = None
             self._next_frame_index = 0
+            self._source_rendered_at.clear()
+            self._published_at.clear()
             return
         segment = state.segment
         if header is None or segment is None:
@@ -240,27 +265,47 @@ class SyntheticCameraPipeline:
         self._last_segment_sequence = segment.sequence
 
     def _publish(self, outcome: CameraRenderOutcome, published_at: float) -> None:
+        frame = self._frames_by_target.pop(outcome.target_id, None)
+        self._last_render_seconds = outcome.render_seconds
+        self._last_stage_seconds = dict(outcome.stage_seconds)
+        self._last_request_ipc_seconds = outcome.request_ipc_seconds
+        self._last_result_ipc_seconds = outcome.result_ipc_seconds
+        self._last_worker_idle_seconds = outcome.worker_idle_seconds
         if outcome.error is not None or outcome.jpeg is None:
             self._last_error = outcome.error or "camera renderer returned no frame"
             self.store.clear()
             return
+        source_rendered_at = published_at - (outcome.result_ipc_seconds or 0.0)
+        self._rendered_frames += 1
+        self._source_rendered_at.append(source_rendered_at)
         self.store.publish(
             outcome.jpeg,
             sequence=outcome.sequence,
             elapsed_s=outcome.elapsed_s,
             render_backend=outcome.render_backend or "unknown",
         )
-        frame = self._frames_by_target.pop(outcome.target_id, None)
+        self._published_frames += 1
+        self._published_at.append(published_at)
+        self._trim_rates(published_at)
         if frame is not None and self._on_published is not None:
             self._on_published(frame, outcome.jpeg)
-        self._rendered_frames += 1
-        self._rendered_at.append(published_at)
-        while self._rendered_at[0] < published_at - self._RATE_WINDOW_S:
-            self._rendered_at.popleft()
-        self._last_render_seconds = outcome.render_seconds
         self._last_mode = outcome.mode
         self._last_reason = outcome.reason
         self._last_error = None
+
+    def _trim_rates(self, now: float) -> None:
+        cutoff = now - self._RATE_WINDOW_S
+        while self._source_rendered_at and self._source_rendered_at[0] < cutoff:
+            self._source_rendered_at.popleft()
+        while self._published_at and self._published_at[0] < cutoff:
+            self._published_at.popleft()
+
+    @staticmethod
+    def _rate(samples: deque[float]) -> float:
+        if len(samples) < 2:
+            return 0.0
+        elapsed_s = samples[-1] - samples[0]
+        return (len(samples) - 1) / elapsed_s if elapsed_s > 0.0 else 0.0
 
     def poll(self, now: float | None = None) -> CameraRenderOutcome | None:
         if self._closed:
@@ -274,35 +319,54 @@ class SyntheticCameraPipeline:
         self._submit_due(current_time)
         return outcome
 
+    def _next_due_delay(self, now: float) -> float | None:
+        segment = self._segment
+        if segment is None or self._next_frame_index >= len(segment.targets):
+            return None
+        target = segment.targets[self._next_frame_index]
+        due_at = segment.started_at + target.elapsed_s - segment.origin_elapsed_s
+        return max(0.0, due_at - now)
+
     async def run(
         self,
         stop_event: asyncio.Event,
-        *,
-        poll_interval_s: float = 0.01,
     ) -> None:
-        if poll_interval_s <= 0.0:
-            raise ValueError("camera poll interval must be positive")
         self.start()
-        while not stop_event.is_set():
+        while not stop_event.is_set() and not self._closed:
+            self._schedule_changed.clear()
             self.poll()
+            if stop_event.is_set() or self._closed:
+                break
+            timeout_s = self._next_due_delay(self._clock())
+            worker_wait = asyncio.create_task(self._worker.wait())
+            schedule_wait = asyncio.create_task(self._schedule_changed.wait())
+            stop_wait = asyncio.create_task(stop_event.wait())
             try:
-                await asyncio.wait_for(stop_event.wait(), timeout=poll_interval_s)
-            except TimeoutError:
-                pass
+                completed, _ = await asyncio.wait(
+                    (worker_wait, schedule_wait, stop_wait),
+                    timeout=timeout_s,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if worker_wait in completed:
+                    worker_wait.result()
+            finally:
+                pending = {
+                    task
+                    for task in (worker_wait, schedule_wait, stop_wait)
+                    if not task.done()
+                }
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
 
     def status(self) -> Mapping[str, object]:
         snapshot = self.store.get()
         now = self._clock()
-        recent_renders = tuple(
-            rendered_at
-            for rendered_at in self._rendered_at
-            if rendered_at >= now - self._RATE_WINDOW_S
-        )
-        source_fps = (
-            (len(recent_renders) - 1) / (now - recent_renders[0])
-            if len(recent_renders) >= 2 and now > recent_renders[0]
-            else 0.0
-        )
+        self._trim_rates(now)
+        source_fps = self._rate(self._source_rendered_at)
+        publish_fps = self._rate(self._published_at)
+        worker_alive = self._worker.is_alive if self._started else False
         return {
             "camera_enabled": True,
             "camera_width": self.config.video.width,
@@ -325,15 +389,42 @@ class SyntheticCameraPipeline:
             "camera_interpolation_reason": self._last_reason,
             "camera_frames_submitted": self._submitted_frames,
             "camera_frames_rendered": self._rendered_frames,
+            "camera_frames_published": self._published_frames,
             "camera_source_fps": round(source_fps, 3),
             "camera_source_fps_window_s": self._RATE_WINDOW_S,
+            "camera_publish_fps": round(publish_fps, 3),
+            "camera_publish_fps_window_s": self._RATE_WINDOW_S,
             "camera_last_render_ms": (
                 round(self._last_render_seconds * 1_000.0, 3)
                 if self._last_render_seconds is not None
                 else None
             ),
+            "camera_last_stage_ms": {
+                name: round(seconds * 1_000.0, 3)
+                for name, seconds in self._last_stage_seconds.items()
+            },
+            "camera_last_request_ipc_ms": (
+                round(self._last_request_ipc_seconds * 1_000.0, 3)
+                if self._last_request_ipc_seconds is not None
+                else None
+            ),
+            "camera_last_result_ipc_ms": (
+                round(self._last_result_ipc_seconds * 1_000.0, 3)
+                if self._last_result_ipc_seconds is not None
+                else None
+            ),
+            "camera_last_worker_idle_ms": (
+                round(self._last_worker_idle_seconds * 1_000.0, 3)
+                if self._last_worker_idle_seconds is not None
+                else None
+            ),
             "camera_pending_replaced": self._worker.replaced_pending,
-            "camera_worker_alive": self._worker.is_alive if self._started else False,
+            "camera_worker_alive": worker_alive,
+            "camera_worker_inflight": self._worker.inflight,
+            "camera_worker_pending": self._worker.pending,
+            "camera_worker_idle": (
+                worker_alive and not self._worker.inflight and not self._worker.pending
+            ),
             "camera_render_error": self._last_error or self._worker.last_error,
         }
 
@@ -341,6 +432,7 @@ class SyntheticCameraPipeline:
         if self._closed:
             return
         self._closed = True
+        self._schedule_changed.set()
         self._segment = None
         if self._started:
             self._worker.close(timeout_s)

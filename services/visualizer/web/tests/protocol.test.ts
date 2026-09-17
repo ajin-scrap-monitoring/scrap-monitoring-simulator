@@ -11,12 +11,27 @@ const descriptor = {
     floor_z_m: 0,
     top_z_m: 4,
     inlet_positions_xy_m: [[1, 1]],
-    surface: { x_coordinates_m: [0, 2], y_coordinates_m: [0, 2] },
-    palette: {
-      background: [0.84, 0.85, 0.84],
-      wall: [0.52, 0.31, 0.16],
-      scrap: [0.5, 0.52, 0.54],
-      guide: [0.88, 0.89, 0.9],
+    surface_grid: { x_coordinates_m: [0, 2], y_coordinates_m: [0, 2] },
+    topology: {
+      floor: {
+        vertices_m: [[0, 0, 0], [2, 0, 0], [2, 2, 0], [0, 2, 0]],
+        faces: [[0, 1, 2], [0, 2, 3]],
+      },
+      walls: {
+        vertices_m: [[0, 0, 0], [2, 0, 0], [2, 0, 4], [0, 0, 4]],
+        faces: [[0, 1, 2], [0, 2, 3]],
+      },
+      surface: {
+        vertices_xy_m: [[0, 0], [2, 0], [2, 2], [0, 2]],
+        faces: [[0, 1, 2], [0, 2, 3]],
+        boundary_edges: [[0, 1], [1, 2], [2, 3], [3, 0]],
+      },
+    },
+    background_color: [0.84, 0.85, 0.84],
+    materials: {
+      floor: { color: [0.25, 0.27, 0.28], metallic: 0.15, roughness: 0.82 },
+      wall: { color: [0.52, 0.31, 0.16], metallic: 0.25, roughness: 0.72 },
+      scrap: { color: [0.5, 0.52, 0.54], metallic: 0.65, roughness: 0.38 },
     },
   },
 };
@@ -34,8 +49,19 @@ function packet(metadata: Record<string, unknown>, heights: readonly number[], j
 
 test("descriptor defines static model topology", () => {
   const parsed = parseVisualStreamDescriptor(descriptor);
-  assert.equal(parsed.model.surface.x_coordinates_m.length * parsed.model.surface.y_coordinates_m.length, 4);
-  assert.deepEqual(parsed.model.palette.scrap, [0.5, 0.52, 0.54]);
+  assert.equal(parsed.model.surface_grid.x_coordinates_m.length * parsed.model.surface_grid.y_coordinates_m.length, 4);
+  assert.deepEqual(parsed.model.topology.surface.boundary_edges, [[0, 1], [1, 2], [2, 3], [3, 0]]);
+  assert.deepEqual(parsed.model.materials.scrap, {
+    color: [0.5, 0.52, 0.54],
+    metallic: 0.65,
+    roughness: 0.38,
+  });
+});
+
+test("descriptor rejects material factors outside the PBR unit interval", () => {
+  const invalid = structuredClone(descriptor);
+  invalid.model.materials.scrap.metallic = 1.1;
+  assert.throws(() => parseVisualStreamDescriptor(invalid), /metallic must be in \[0, 1\]/);
 });
 
 test("binary visual frame has little-endian heights and exact payload lengths", () => {

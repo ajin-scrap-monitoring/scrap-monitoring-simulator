@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from dataclasses import replace
 from pathlib import Path
@@ -30,8 +31,14 @@ class FakeWorker:
         self.started = False
         self.alive = True
         self.invalidations = 0
+        self.poll_calls = 0
+        self.wait_calls = 0
+        self.inflight = False
+        self.pending = False
         self.submitted: list[CameraRenderRequest] = []
         self.outcomes: deque[CameraRenderOutcome] = deque()
+        self.replaced_on_submit: deque[int | None] = deque()
+        self.ready = asyncio.Event()
 
     def start(self) -> None:
         self.started = True
@@ -40,14 +47,36 @@ class FakeWorker:
     def is_alive(self) -> bool:
         return self.alive
 
-    def submit(self, request: CameraRenderRequest) -> None:
+    def submit(self, request: CameraRenderRequest) -> int | None:
         self.submitted.append(request)
+        self.inflight = True
+        replaced = (
+            self.replaced_on_submit.popleft() if self.replaced_on_submit else None
+        )
+        self.pending = replaced is not None
+        return replaced
 
     def invalidate(self) -> None:
         self.invalidations += 1
+        self.pending = False
 
     def poll(self) -> CameraRenderOutcome | None:
-        return self.outcomes.popleft() if self.outcomes else None
+        self.poll_calls += 1
+        if not self.outcomes:
+            return None
+        outcome = self.outcomes.popleft()
+        self.inflight = False
+        if not self.outcomes:
+            self.ready.clear()
+        return outcome
+
+    async def wait(self) -> None:
+        self.wait_calls += 1
+        await self.ready.wait()
+
+    def complete(self, outcome: CameraRenderOutcome) -> None:
+        self.outcomes.append(outcome)
+        self.ready.set()
 
     def close(self, timeout_s: float = 5.0) -> None:
         del timeout_s
@@ -135,13 +164,25 @@ def test_pipeline_schedules_targets_from_v2_segment_and_publishes_outcome() -> N
             render_backend="test",
             render_seconds=0.02,
             error=None,
+            stage_seconds={"vtk_render": 0.011, "jpeg_encode": 0.004},
+            request_ipc_seconds=0.001,
+            result_ipc_seconds=0.002,
+            worker_idle_seconds=0.003,
         )
     )
     pipeline.poll(now=10.1)
 
     assert pipeline.store.get() is not None
     assert pipeline.status()["camera_frames_rendered"] == 1
+    assert pipeline.status()["camera_frames_published"] == 1
     assert pipeline.status()["camera_last_render_ms"] == 20.0
+    assert pipeline.status()["camera_last_stage_ms"] == {
+        "vtk_render": 11.0,
+        "jpeg_encode": 4.0,
+    }
+    assert pipeline.status()["camera_last_request_ipc_ms"] == 1.0
+    assert pipeline.status()["camera_last_result_ipc_ms"] == 2.0
+    assert pipeline.status()["camera_last_worker_idle_ms"] == 3.0
     pipeline.close()
 
 
@@ -191,3 +232,115 @@ def test_pipeline_fails_when_camera_renderer_process_exits() -> None:
         raise AssertionError("dead camera renderer was not detected")
     finally:
         pipeline.close()
+
+
+def test_pipeline_discards_replaced_and_failed_frame_metadata() -> None:
+    header, segment = _records()
+    worker = FakeWorker()
+    now = [10.0]
+    pipeline = SyntheticCameraPipeline(
+        SyntheticCameraConfig.from_file(), worker=worker, clock=lambda: now[0]
+    )
+    pipeline.state_changed(_state(header, segment))
+    assert set(pipeline._frames_by_target) == {0}
+
+    worker.replaced_on_submit.append(0)
+    now[0] += 1 / 30
+    pipeline.poll(now=now[0])
+    assert set(pipeline._frames_by_target) == {1}
+
+    worker.outcomes.append(
+        CameraRenderOutcome(
+            generation=0,
+            target_id=1,
+            sequence=1,
+            elapsed_s=1 / 30,
+            mode="interpolated",
+            reason=None,
+            jpeg=None,
+            render_backend=None,
+            render_seconds=0.02,
+            error="render failed",
+        )
+    )
+    pipeline.poll(now=now[0])
+    assert pipeline._frames_by_target == {}
+    pipeline.close()
+
+
+def test_pipeline_reports_distinct_render_and_publish_rates() -> None:
+    worker = FakeWorker()
+    now = [10.0]
+    pipeline = SyntheticCameraPipeline(
+        SyntheticCameraConfig.from_file(), worker=worker, clock=lambda: now[0]
+    )
+    pipeline.start()
+    for target_id, result_ipc_seconds in ((1, 0.01), (2, 0.03)):
+        worker.outcomes.append(
+            CameraRenderOutcome(
+                generation=0,
+                target_id=target_id,
+                sequence=target_id,
+                elapsed_s=target_id / 30,
+                mode="interpolated",
+                reason=None,
+                jpeg=b"\xff\xd8frame\xff\xd9",
+                render_backend="test",
+                render_seconds=0.02,
+                error=None,
+                result_ipc_seconds=result_ipc_seconds,
+            )
+        )
+        pipeline.poll(now=now[0])
+        now[0] += 0.1
+
+    status = pipeline.status()
+    assert status["camera_source_fps"] == 12.5
+    assert status["camera_publish_fps"] == 10.0
+    assert status["camera_pending_replaced"] == 0
+    assert status["camera_worker_inflight"] is False
+    assert status["camera_worker_pending"] is False
+    assert status["camera_worker_idle"] is True
+    pipeline.close()
+
+
+def test_pipeline_run_waits_for_worker_completion_without_idle_polling() -> None:
+    async def exercise() -> None:
+        worker = FakeWorker()
+        pipeline = SyntheticCameraPipeline(
+            SyntheticCameraConfig.from_file(), worker=worker
+        )
+        stop_event = asyncio.Event()
+        run_task = asyncio.create_task(pipeline.run(stop_event))
+        await asyncio.sleep(0)
+        initial_polls = worker.poll_calls
+
+        await asyncio.sleep(0.02)
+        assert worker.poll_calls == initial_polls
+        assert worker.wait_calls == 1
+
+        worker.complete(
+            CameraRenderOutcome(
+                generation=0,
+                target_id=1,
+                sequence=1,
+                elapsed_s=1 / 30,
+                mode="interpolated",
+                reason=None,
+                jpeg=b"\xff\xd8frame\xff\xd9",
+                render_backend="test",
+                render_seconds=0.02,
+                error=None,
+            )
+        )
+        for _ in range(10):
+            if pipeline.store.get() is not None:
+                break
+            await asyncio.sleep(0)
+        assert pipeline.store.get() is not None
+
+        stop_event.set()
+        await run_task
+        pipeline.close()
+
+    asyncio.run(exercise())

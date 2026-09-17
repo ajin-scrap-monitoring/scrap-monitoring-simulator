@@ -5,7 +5,11 @@ from __future__ import annotations
 from bisect import bisect_right
 from dataclasses import dataclass
 
-from scrap_monitoring_visualizer.contracts.models import SceneDefinition, SceneFrame
+from scrap_monitoring_visualizer.contracts.models import (
+    SceneDefinition,
+    SceneFrame,
+    SurfaceGrid,
+)
 from scrap_monitoring_visualizer.limits import (
     MAX_CLIP_EDGE_TESTS,
     MAX_SURFACE_TRIANGLES,
@@ -63,31 +67,19 @@ class SceneGeometryTopology:
             (x_m, y_m, surface_height_at(frame, x_m, y_m))
             for x_m, y_m in self.surface_xy
         )
-        volume_vertices: list[Point3] = []
-        volume_faces: list[Triangle] = []
+        volume_builder = _MeshBuilder()
         for start_index, end_index in self.surface_boundary_edges:
             top_start = surface_vertices[start_index]
             top_end = surface_vertices[end_index]
-            offset = len(volume_vertices)
-            volume_vertices.extend(
-                (
-                    top_start,
-                    (top_start[0], top_start[1], self.floor_z_m),
-                    (top_end[0], top_end[1], self.floor_z_m),
-                    top_end,
-                )
-            )
-            volume_faces.extend(
-                (
-                    (offset, offset + 1, offset + 2),
-                    (offset, offset + 2, offset + 3),
-                )
-            )
+            lower_start = (top_start[0], top_start[1], self.floor_z_m)
+            lower_end = (top_end[0], top_end[1], self.floor_z_m)
+            volume_builder.triangle(top_start, lower_start, lower_end)
+            volume_builder.triangle(top_start, lower_end, top_end)
         return SceneGeometry(
             floor=self.floor,
             walls=self.walls,
             surface=Mesh(surface_vertices, self.surface_faces),
-            volume_sides=Mesh(tuple(volume_vertices), tuple(volume_faces)),
+            volume_sides=volume_builder.build(),
         )
 
 
@@ -279,19 +271,18 @@ def _add_polygon(builder: _MeshBuilder, points: tuple[Point3, ...]) -> None:
         builder.triangle(polygon[0], polygon[index], polygon[index + 1])
 
 
-def _surface_triangles(
-    frame: SceneFrame,
+def _flat_surface_triangles(
+    surface: SurfaceGrid,
 ) -> tuple[tuple[Point3, Point3, Point3], ...]:
-    surface = frame.surface
     triangles: list[tuple[Point3, Point3, Point3]] = []
     for y_index in range(len(surface.y_coordinates_m) - 1):
         for x_index in range(len(surface.x_coordinates_m) - 1):
             x0, x1 = surface.x_coordinates_m[x_index : x_index + 2]
             y0, y1 = surface.y_coordinates_m[y_index : y_index + 2]
-            lower_left = (x0, y0, surface.heights_m[y_index][x_index])
-            lower_right = (x1, y0, surface.heights_m[y_index][x_index + 1])
-            upper_left = (x0, y1, surface.heights_m[y_index + 1][x_index])
-            upper_right = (x1, y1, surface.heights_m[y_index + 1][x_index + 1])
+            lower_left = (x0, y0, 0.0)
+            lower_right = (x1, y0, 0.0)
+            upper_left = (x0, y1, 0.0)
+            upper_right = (x1, y1, 0.0)
             triangles.extend(
                 (
                     (lower_left, lower_right, upper_right),
@@ -332,29 +323,6 @@ def surface_height_at(frame: SceneFrame, x_m: float, y_m: float) -> float:
     return lower_left + u * (upper_right - upper_left) + v * (upper_left - lower_left)
 
 
-def _build_volume_sides(surface: Mesh, floor_z_m: float) -> Mesh:
-    edge_counts: dict[tuple[int, int], int] = {}
-    oriented_edges: dict[tuple[int, int], tuple[int, int]] = {}
-    for face in surface.faces:
-        for edge_start, edge_end in zip(face, face[1:] + face[:1], strict=True):
-            key = (min(edge_start, edge_end), max(edge_start, edge_end))
-            edge_counts[key] = edge_counts.get(key, 0) + 1
-            oriented_edges.setdefault(key, (edge_start, edge_end))
-
-    builder = _MeshBuilder()
-    for key in sorted(edge_counts):
-        if edge_counts[key] != 1:
-            continue
-        start_index, end_index = oriented_edges[key]
-        top_start = surface.vertices[start_index]
-        top_end = surface.vertices[end_index]
-        lower_start = (top_start[0], top_start[1], floor_z_m)
-        lower_end = (top_end[0], top_end[1], floor_z_m)
-        builder.triangle(top_start, lower_start, lower_end)
-        builder.triangle(top_start, lower_end, top_end)
-    return builder.build()
-
-
 def _surface_boundary_edges(surface: Mesh) -> tuple[tuple[int, int], ...]:
     edge_counts: dict[tuple[int, int], int] = {}
     oriented_edges: dict[tuple[int, int], tuple[int, int]] = {}
@@ -369,8 +337,13 @@ def _surface_boundary_edges(surface: Mesh) -> tuple[tuple[int, int], ...]:
 
 
 def build_scene_geometry(header: SceneDefinition, frame: SceneFrame) -> SceneGeometry:
-    if frame.run_id != header.run_id:
-        raise ValueError("frame run_id does not match header")
+    return build_scene_geometry_topology(header).materialize(frame)
+
+
+def build_scene_geometry_topology(
+    header: SceneDefinition,
+) -> SceneGeometryTopology:
+    """Build static clipped geometry from a scene definition's immutable grid."""
     boundary = _normalized_polygon(header.scene.boundary_xy_m)
     boundary_triangles = triangulate_polygon(boundary)
 
@@ -391,7 +364,8 @@ def build_scene_geometry(header: SceneDefinition, frame: SceneFrame) -> SceneGeo
         wall_builder.triangle(lower_left, lower_right, upper_right)
         wall_builder.triangle(lower_left, upper_right, upper_left)
 
-    source_triangles = _surface_triangles(frame)
+    surface_grid = header.scene.surface
+    source_triangles = _flat_surface_triangles(surface_grid)
     if len(source_triangles) * len(boundary_triangles) * 3 > MAX_CLIP_EDGE_TESTS:
         raise ValueError("clipping operation limit exceeded")
     surface_builder = _MeshBuilder()
@@ -402,30 +376,16 @@ def build_scene_geometry(header: SceneDefinition, frame: SceneFrame) -> SceneGeo
                 surface_builder,
                 _clip_triangle(source_triangle, boundary_triangle, operation_count),
             )
-    surface = surface_builder.build()
-    return SceneGeometry(
-        floor=floor_builder.build(),
-        walls=wall_builder.build(),
-        surface=surface,
-        volume_sides=_build_volume_sides(surface, header.scene.floor_z_m),
-    )
-
-
-def build_scene_geometry_topology(
-    header: SceneDefinition,
-    frame: SceneFrame,
-) -> SceneGeometryTopology:
-    geometry = build_scene_geometry(header, frame)
-    surface = frame.surface
+    flat_surface = surface_builder.build()
     return SceneGeometryTopology(
         run_id=header.run_id,
         floor_z_m=header.scene.floor_z_m,
-        cell_size_m=surface.cell_size_m,
-        x_coordinates_m=surface.x_coordinates_m,
-        y_coordinates_m=surface.y_coordinates_m,
-        floor=geometry.floor,
-        walls=geometry.walls,
-        surface_xy=tuple((x_m, y_m) for x_m, y_m, _ in geometry.surface.vertices),
-        surface_faces=geometry.surface.faces,
-        surface_boundary_edges=_surface_boundary_edges(geometry.surface),
+        cell_size_m=surface_grid.cell_size_m,
+        x_coordinates_m=surface_grid.x_coordinates_m,
+        y_coordinates_m=surface_grid.y_coordinates_m,
+        floor=floor_builder.build(),
+        walls=wall_builder.build(),
+        surface_xy=tuple((x_m, y_m) for x_m, y_m, _ in flat_surface.vertices),
+        surface_faces=flat_surface.faces,
+        surface_boundary_edges=_surface_boundary_edges(flat_surface),
     )

@@ -12,13 +12,14 @@ def test_default_camera_profile_is_packaged_and_valid() -> None:
     config = SyntheticCameraConfig.from_file()
 
     assert config.version == 1
-    assert config.backend == "auto"
+    assert config.backend == "osmesa"
     assert (config.video.width, config.video.height, config.video.fps) == (
         1920,
         1080,
         30,
     )
     assert (config.video.raster_width, config.video.raster_height) == (576, 324)
+    assert config.video.jpeg_quality == 60
     assert config.video.max_frame_bytes == 4_194_304
     assert config.camera.position_normalized == (
         0.0,

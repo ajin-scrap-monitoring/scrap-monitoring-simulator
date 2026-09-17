@@ -6,9 +6,19 @@ services:
       SCRAP_SIMULATOR_SCENE_HOST: visualizer
       SCRAP_SIMULATOR_SCENE_PORT: "17000"
       SCRAP_SIMULATOR_MEAN_FILL_DURATION_S: ${SCRAP_SIMULATOR_MEAN_FILL_DURATION_S:-600}
+      SCRAP_SIMULATOR_LIDAR_1_BIND: 0.0.0.0:8089
+      SCRAP_SIMULATOR_LIDAR_2_BIND: 0.0.0.0:8090
     ports:
-      - ${SCRAP_SIMULATOR_LIDAR_1_PORT:-8089}:8089/udp
-      - ${SCRAP_SIMULATOR_LIDAR_2_PORT:-8090}:8090/udp
+      - name: lidar-1
+        host_ip: ${SCRAP_SIMULATOR_LIDAR_1_HOST:-127.0.0.2}
+        target: 8089
+        published: "${SCRAP_SIMULATOR_LIDAR_PORT:-8089}"
+        protocol: udp
+      - name: lidar-2
+        host_ip: ${SCRAP_SIMULATOR_LIDAR_2_HOST:-127.0.0.3}
+        target: 8090
+        published: "${SCRAP_SIMULATOR_LIDAR_PORT:-8089}"
+        protocol: udp
     depends_on:
       visualizer:
         condition: service_healthy

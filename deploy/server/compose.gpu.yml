@@ -1,0 +1,9 @@
+services:
+  visualizer:
+    environment:
+      SCRAP_MONITORING_VISUALIZER_CAMERA_BACKEND: egl
+      VTK_DEFAULT_OPENGL_WINDOW: vtkEGLRenderWindow
+      LIBGL_ALWAYS_SOFTWARE: "0"
+      NVIDIA_DRIVER_CAPABILITIES: graphics,utility
+      NVIDIA_VISIBLE_DEVICES: ${SCRAP_SIMULATOR_NVIDIA_VISIBLE_DEVICES:-all}
+    gpus: all

@@ -62,14 +62,14 @@ class LiveCoordinator:
 
     @property
     def definition(self) -> SceneDefinition | None:
-        return self._state.header
+        return self._state.header if self._state.connected else None
 
     def state_changed(self, state: ExecutionState) -> None:
         self._state = state
         if self._camera is not None:
             self._camera.state_changed(state)
         segment = state.segment
-        if segment is None:
+        if not state.connected or segment is None:
             self._visual_store.clear()
             self._last_received_sequence = None
             self._last_valid_received_at = None
@@ -186,31 +186,33 @@ async def run_live(config: LiveConfig) -> int:
             ws_ping_timeout=2.0,
         )
     )
-    poll_error: Exception | None = None
+    renderer_error: Exception | None = None
+    renderer_stop = asyncio.Event()
 
-    async def poll_renderer() -> None:
-        nonlocal poll_error
+    async def run_renderer() -> None:
+        nonlocal renderer_error
+        assert camera is not None
         try:
-            while not uvicorn_server.should_exit:
-                coordinator.poll_renderers()
-                await asyncio.sleep(0.005)
+            await camera.run(renderer_stop)
         except Exception as error:
-            poll_error = error
+            renderer_error = error
             uvicorn_server.should_exit = True
 
-    poll_task = asyncio.create_task(poll_renderer())
+    renderer_task = asyncio.create_task(run_renderer()) if camera is not None else None
     try:
         async with tcp_server:
             await uvicorn_server.serve()
     finally:
         uvicorn_server.should_exit = True
+        renderer_stop.set()
         tcp_server.close()
         await tcp_server.wait_closed()
         try:
-            await poll_task
+            if renderer_task is not None:
+                await renderer_task
         finally:
             if camera is not None:
                 camera.close()
-    if poll_error is not None:
-        raise RuntimeError("render polling failed") from poll_error
+    if renderer_error is not None:
+        raise RuntimeError("renderer event loop failed") from renderer_error
     return 0

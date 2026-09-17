@@ -388,11 +388,24 @@ mod tests {
     }
 
     #[test]
+    fn runtime_settings_accept_distinct_udp_hosts_on_the_same_port() {
+        let settings = RuntimeSettings {
+            config_path: "config/simulation-server.v1.json".into(),
+            lidar_1_bind: "127.0.0.2:8089".parse().unwrap(),
+            lidar_2_bind: "127.0.0.3:8089".parse().unwrap(),
+            scene_host: "127.0.0.1".into(),
+            scene_port: 17_000,
+            mean_fill_duration_s: None,
+        };
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
     fn runtime_settings_reject_invalid_mean_fill_duration_override() {
         let settings = RuntimeSettings {
             config_path: "config/simulation-server.v1.json".into(),
-            lidar_1_bind: "127.0.0.1:8089".parse().unwrap(),
-            lidar_2_bind: "127.0.0.1:8090".parse().unwrap(),
+            lidar_1_bind: "127.0.0.2:8089".parse().unwrap(),
+            lidar_2_bind: "127.0.0.3:8089".parse().unwrap(),
             scene_host: "127.0.0.1".into(),
             scene_port: 17_000,
             mean_fill_duration_s: Some(0.0),

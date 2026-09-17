@@ -66,9 +66,10 @@ def test_browser_probe_activates_target_and_reads_page_state() -> None:
             [
                 json.dumps({"id": 1, "result": {}}),
                 json.dumps({"id": 2, "result": {}}),
+                json.dumps({"id": 3, "result": {}}),
                 json.dumps(
                     {
-                        "id": 3,
+                        "id": 4,
                         "result": {
                             "result": {
                                 "value": json.dumps(
@@ -85,18 +86,20 @@ def test_browser_probe_activates_target_and_reads_page_state() -> None:
             ]
         )
 
-        assert await _prepare_page(socket) == 2
-        state = await _page_state(socket, 3)
+        assert await _prepare_page(socket) == 3
+        state = await _page_state(socket, 4)
         _validate_page_state(state)
         commands = [json.loads(message) for message in socket.sent]
         assert [command["method"] for command in commands] == [
             "Runtime.enable",
             "Page.bringToFront",
+            "Emulation.setFocusEmulationEnabled",
             "Runtime.evaluate",
         ]
-        assert "document.visibilityState" in commands[2]["params"]["expression"]
-        assert "document.hidden" in commands[2]["params"]["expression"]
-        assert "document.hasFocus()" in commands[2]["params"]["expression"]
+        assert commands[2]["params"] == {"enabled": True}
+        assert "document.visibilityState" in commands[3]["params"]["expression"]
+        assert "document.hidden" in commands[3]["params"]["expression"]
+        assert "document.hasFocus()" in commands[3]["params"]["expression"]
 
     asyncio.run(exercise())
 
@@ -304,10 +307,15 @@ def _result(**overrides: int | float) -> BrowserProbeResult:
         "stable_samples": 9,
         "total_samples": 10,
         "source_fps": 30.0,
-        "network_fps": 30.0,
+        "source_publish_fps": 30.0,
+        "received_fps": 30.0,
+        "decoded_fps": 30.0,
         "presented_fps": 30.0,
         "received_frames": 300,
+        "decoded_frames": 300,
         "presented_frames": 300,
+        "decode_duration_ms": 1.0,
+        "decode_duration_max_ms": 2.0,
         "dropped_before_decode": 0,
         "dropped_before_present": 0,
         "decode_errors": 0,
@@ -344,9 +352,12 @@ def _sample(
     return {
         "sampled_at_ms": sampled_at_s * 1_000.0,
         "window_s": 5.0,
-        "source": {"rendered_fps": source_fps},
+        "source": {"rendered_fps": source_fps, "published_fps": source_fps},
         "network": {"received_frames": frames},
         "browser": {
+            "decoded_frames": frames,
+            "decode_duration_ms": 1.0,
+            "decode_duration_max_ms": 2.0,
             "presented_frames": frames,
             "dropped_before_decode": 0,
             "dropped_before_present": 0,
@@ -357,6 +368,9 @@ def _sample(
             "pending_decode": 0,
             "decode_inflight": 1,
             "pending_present": 0,
+            "max_pending_decode": 0,
+            "max_decode_inflight": 1,
+            "max_pending_present": 0,
         },
     }
 
@@ -384,7 +398,8 @@ def test_browser_probe_uses_measured_counter_deltas_and_stable_windows() -> None
     )
 
     assert result.measured_duration_s == 10.0
-    assert result.network_fps == 27.0
+    assert result.received_fps == 27.0
+    assert result.decoded_fps == 27.0
     assert result.presented_fps == 27.0
     assert result.stable_samples == result.total_samples
 

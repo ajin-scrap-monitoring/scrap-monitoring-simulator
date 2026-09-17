@@ -28,6 +28,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libegl1=1.6.0-1 \
         libgl1=1.6.0-1 \
+        libglvnd0=1.6.0-1 \
+        libopengl0=1.6.0-1 \
         libosmesa6=22.3.6-1+deb12u2 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -111,7 +113,7 @@ COPY --chown=visualizer:visualizer services/visualizer/licenses/THIRD_PARTY_NOTI
     /workspace/visualizer/licenses/THIRD_PARTY_NOTICES.html
 
 ARG BUILD_REVISION=unknown
-ARG BUILD_VERSION=0.3.2
+ARG BUILD_VERSION=0.4.0
 
 LABEL org.opencontainers.image.description="Canonical scene browser and synthetic camera renderer" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \

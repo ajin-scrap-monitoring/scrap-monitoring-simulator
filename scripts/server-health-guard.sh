@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Guards an isolated server acceptance command with host health samples.
+# Guards a server validation command with host health samples.
 set -euo pipefail
 
 sample_interval_s="${SCRAP_SIMULATOR_HEALTH_SAMPLE_INTERVAL_S:-1}"
@@ -38,7 +38,7 @@ usage() {
 usage: scripts/server-health-guard.sh [options] [-- command [arguments...]]
 
 options:
-  --container NAME             Check an isolated acceptance container.
+  --container NAME             Check a validation target container.
   --log-file PATH              Write samples to PATH. Default: /tmp.
   --dry-run                    Run preflight and cooldown without a command.
   --preflight-seconds N        Default: 60.
@@ -46,7 +46,7 @@ options:
   --cooldown-seconds N         Default: 60.
   -h, --help                   Show this help.
 
-The command must own only the isolated acceptance process group. The guard never
+The command must own only its validation process group. The guard never
 stops unrelated containers or processes.
 EOF
 }
@@ -217,7 +217,7 @@ record_container_baseline() {
 
 stop_command() {
     if [[ -n "$command_pid" ]] && kill -0 "$command_pid" 2>/dev/null; then
-        echo "stopping isolated acceptance process group" >&2
+        echo "stopping validation process group" >&2
         kill -- "-$command_pid" 2>/dev/null || true
         wait "$command_pid" 2>/dev/null || true
     fi
