@@ -28,7 +28,7 @@ check_static() {
         services/visualizer/src/scrap_monitoring_visualizer/contracts/schema/v2/definition.schema.json
     cmp contracts/scene/v2/segment.schema.json \
         services/visualizer/src/scrap_monitoring_visualizer/contracts/schema/v2/segment.schema.json
-    bash -n scripts/*.sh deploy/edge/*.sh
+    bash -n scripts/*.sh deploy/*.sh deploy/edge/*.sh
     git diff-tree --check --root -r HEAD
     git diff --check HEAD
     scripts/check-deployment.sh
