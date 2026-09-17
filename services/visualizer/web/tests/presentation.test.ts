@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LatestTargetPresentation, type DecodedVisualFrame } from "../src/presentation.js";
+import {
+  LatestPacketQueue,
+  LatestTargetPresentation,
+  type DecodedVisualFrame,
+} from "../src/presentation.js";
 
-function candidate(targetId: number): DecodedVisualFrame {
+function candidate(targetId: number, closed: number[] = []): DecodedVisualFrame {
   return {
     frame: {
       metadata: {
@@ -18,26 +22,59 @@ function candidate(targetId: number): DecodedVisualFrame {
       heights: new Float32Array([0]),
       jpeg: new Uint8Array([0]),
     },
-    image: { close: () => undefined } as ImageBitmap,
+    image: {
+      close: () => {
+        closed.push(targetId);
+      },
+    } as unknown as ImageBitmap,
+    cameraTargetId: targetId,
   };
 }
 
 test("latest target replaces queued work without catchup", () => {
+  const closed: number[] = [];
   const presentation = new LatestTargetPresentation();
-  assert.equal(presentation.offer(candidate(1)), true);
-  assert.equal(presentation.offer(candidate(3)), true);
-  assert.equal(presentation.offer(candidate(2)), false);
+  assert.deepEqual(presentation.offer(candidate(1, closed)), { accepted: true, droppedFrames: 0 });
+  assert.deepEqual(presentation.offer(candidate(3, closed)), { accepted: true, droppedFrames: 1 });
+  assert.deepEqual(presentation.offer(candidate(2, closed)), { accepted: false, droppedFrames: 1 });
+  assert.deepEqual(closed, [1, 2]);
+  assert.equal(presentation.size, 1);
   assert.equal(presentation.consume()?.frame.metadata.target_id, 3);
-  assert.equal(presentation.offer(candidate(2)), false);
+  assert.equal(presentation.size, 0);
+  assert.deepEqual(presentation.offer(candidate(2, closed)), { accepted: false, droppedFrames: 1 });
+  assert.deepEqual(closed, [1, 2, 2]);
 });
 
 test("reset accepts a restarted stream whose target ids begin again", () => {
   const presentation = new LatestTargetPresentation();
-  assert.equal(presentation.offer(candidate(20)), true);
+  assert.deepEqual(presentation.offer(candidate(20)), { accepted: true, droppedFrames: 0 });
   assert.equal(presentation.consume()?.frame.metadata.target_id, 20);
 
-  presentation.reset();
+  assert.equal(presentation.reset(), 0);
 
-  assert.equal(presentation.offer(candidate(0)), true);
+  assert.deepEqual(presentation.offer(candidate(0)), { accepted: true, droppedFrames: 0 });
   assert.equal(presentation.consume()?.frame.metadata.target_id, 0);
+});
+
+test("reset closes and counts a decoded frame that was not presented", () => {
+  const closed: number[] = [];
+  const presentation = new LatestTargetPresentation();
+  presentation.offer(candidate(4, closed));
+
+  assert.equal(presentation.reset(), 1);
+  assert.deepEqual(closed, [4]);
+  assert.equal(presentation.size, 0);
+});
+
+test("latest packet queue reports replacement and reset drops", () => {
+  const queue = new LatestPacketQueue<number>();
+
+  assert.equal(queue.offer(1), 0);
+  assert.equal(queue.size, 1);
+  assert.equal(queue.offer(2), 1);
+  assert.equal(queue.take(), 2);
+  assert.equal(queue.size, 0);
+  assert.equal(queue.reset(), 0);
+  assert.equal(queue.offer(3), 0);
+  assert.equal(queue.reset(), 1);
 });

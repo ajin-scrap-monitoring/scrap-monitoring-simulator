@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "backend": "auto",
+  "backend": "osmesa",
   "video": {
     "width": 1920,
     "height": 1080,
     "raster_width": 576,
     "raster_height": 324,
     "fps": 30,
-    "jpeg_quality": 85,
+    "jpeg_quality": 60,
     "max_frame_bytes": 4194304
   },
   "timing": {

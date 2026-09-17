@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
+from types import MappingProxyType
 
+import pytest
 from PIL import Image
 
 from scrap_monitoring_visualizer.contracts import (
@@ -76,6 +78,18 @@ def test_vtk_backend_renders_perspective_mjpeg_source_frame() -> None:
     assert frame.jpeg.startswith(b"\xff\xd8")
     assert frame.jpeg.endswith(b"\xff\xd9")
     assert frame.render_backend.startswith("vtk")
+    assert isinstance(frame.stage_seconds, MappingProxyType)
+    assert set(frame.stage_seconds) == {
+        "scene_update",
+        "vtk_render",
+        "framebuffer_readback",
+        "effects",
+        "resize",
+        "jpeg_encode",
+    }
+    assert all(duration >= 0.0 for duration in frame.stage_seconds.values())
+    with pytest.raises(TypeError):
+        frame.stage_seconds["vtk_render"] = 0.0  # type: ignore[index]
     assert updated.jpeg != frame.jpeg
     with Image.open(BytesIO(frame.jpeg)) as image:
         assert image.format == "JPEG"

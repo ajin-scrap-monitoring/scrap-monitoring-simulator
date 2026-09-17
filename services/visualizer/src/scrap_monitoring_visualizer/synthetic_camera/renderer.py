@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import math
+import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from io import BytesIO
+from types import MappingProxyType
 from typing import Protocol, cast
 
 import numpy as np
@@ -55,6 +58,11 @@ class ChutePose:
     pivot_xy_m: tuple[float, float]
     outlet_xy_m: tuple[float, float]
     polar_angle_rad: float
+
+
+@dataclass(frozen=True, slots=True)
+class TimedRenderedCameraFrame(RenderedCameraFrame):
+    stage_seconds: Mapping[str, float]
 
 
 _GEOMETRY_EPSILON = 1e-9
@@ -676,6 +684,36 @@ def _validate_render_window(config: SyntheticCameraConfig, observed: str) -> Non
         )
 
 
+def _opengl_capability(capabilities: str, name: str) -> str:
+    expected = name.casefold()
+    for line in capabilities.splitlines():
+        label, separator, value = line.partition(":")
+        if separator and label.strip().casefold() == expected:
+            observed = value.strip()
+            if observed:
+                return observed
+    raise RuntimeError(f"renderer did not report {name}")
+
+
+def _validate_render_device(
+    config: SyntheticCameraConfig,
+    *,
+    supports_opengl: bool,
+    capabilities: str,
+) -> None:
+    if config.backend != "egl":
+        return
+    if not supports_opengl:
+        raise RuntimeError("configured egl backend does not support OpenGL")
+    vendor = _opengl_capability(capabilities, "OpenGL vendor string")
+    renderer = _opengl_capability(capabilities, "OpenGL renderer string")
+    if "nvidia" not in vendor.casefold() or "nvidia" not in renderer.casefold():
+        raise RuntimeError(
+            "configured egl backend requires an NVIDIA OpenGL vendor and renderer; "
+            f"observed vendor={vendor!r}, renderer={renderer!r}"
+        )
+
+
 class VtkPbrRenderer:
     """Current CPU-capable backend with an EGL-compatible boundary."""
 
@@ -690,6 +728,7 @@ class VtkPbrRenderer:
         self._chute_data: pv.PolyData | None = None
         self._chute_pose: ChutePose | None = None
         self._scaler: _VtkBilinearScaler | None = None
+        self._render_device_validated = False
 
     def close(self) -> None:
         if self._plotter is not None:
@@ -704,6 +743,7 @@ class VtkPbrRenderer:
         self._chute_data = None
         self._chute_pose = None
         self._scaler = None
+        self._render_device_validated = False
 
     def _initialize_scene(
         self,
@@ -851,7 +891,9 @@ class VtkPbrRenderer:
         config: SyntheticCameraConfig,
         *,
         interpolation: InterpolatedFrame | None = None,
-    ) -> RenderedCameraFrame:
+    ) -> TimedRenderedCameraFrame:
+        stage_seconds: dict[str, float] = {}
+        stage_started_at = time.perf_counter()
         config.validate()
         plotter = self._plotter
         topology = self._topology
@@ -874,15 +916,30 @@ class VtkPbrRenderer:
                 geometry,
                 interpolation,
             )
+        stage_seconds["scene_update"] = time.perf_counter() - stage_started_at
         assert plotter is not None
         image: np.ndarray | None = None
         render_window = ""
         if plotter.camera.parallel_projection:
             raise RuntimeError("synthetic camera must use perspective projection")
+        stage_started_at = time.perf_counter()
         plotter.render()
-        render_window = type(plotter.render_window).__name__
+        vtk_render_window = plotter.render_window
+        if vtk_render_window is None:
+            raise RuntimeError("renderer did not create a render window")
+        render_window = type(vtk_render_window).__name__
         _validate_render_window(config, render_window)
+        stage_seconds["vtk_render"] = time.perf_counter() - stage_started_at
+        stage_started_at = time.perf_counter()
         image = plotter.screenshot(return_img=True)
+        stage_seconds["framebuffer_readback"] = time.perf_counter() - stage_started_at
+        if config.backend == "egl" and not self._render_device_validated:
+            _validate_render_device(
+                config,
+                supports_opengl=bool(vtk_render_window.SupportsOpenGL()),
+                capabilities=str(vtk_render_window.ReportCapabilities()),
+            )
+            self._render_device_validated = True
         if image is None or image.shape[:2] != (
             config.video.raster_height,
             config.video.raster_width,
@@ -892,16 +949,21 @@ class VtkPbrRenderer:
         effect_seed = (
             header.seed ^ frame.sequence ^ round(frame.scenario.elapsed_s * 1_000_000)
         )
+        stage_started_at = time.perf_counter()
         processed = _apply_effects(
             image,
             seed=effect_seed,
             noise_standard_deviation=config.effects.noise_standard_deviation,
             vignette_strength=config.effects.vignette_strength,
         )
+        stage_seconds["effects"] = time.perf_counter() - stage_started_at
         scaler = self._scaler
         if scaler is None:
             raise RuntimeError("renderer did not initialize the bilinear scaler")
+        stage_started_at = time.perf_counter()
         output_image = Image.fromarray(scaler.resize(processed))
+        stage_seconds["resize"] = time.perf_counter() - stage_started_at
+        stage_started_at = time.perf_counter()
         output = BytesIO()
         output_image.save(
             output,
@@ -911,15 +973,17 @@ class VtkPbrRenderer:
             progressive=False,
         )
         jpeg = output.getvalue()
+        stage_seconds["jpeg_encode"] = time.perf_counter() - stage_started_at
         if len(jpeg) > config.video.max_frame_bytes:
             raise RuntimeError("rendered JPEG exceeds the configured byte limit")
-        return RenderedCameraFrame(
+        return TimedRenderedCameraFrame(
             jpeg=jpeg,
             sequence=frame.sequence,
             elapsed_s=frame.scenario.elapsed_s,
             width=config.video.width,
             height=config.video.height,
             render_backend=render_window,
+            stage_seconds=MappingProxyType(stage_seconds.copy()),
         )
 
 

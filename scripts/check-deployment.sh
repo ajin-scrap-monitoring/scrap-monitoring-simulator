@@ -24,6 +24,14 @@ for environment_file in "$server_environment" "$edge_environment"; do
     fi
 done
 
+for removed_name in SCRAP_SIMULATOR_LIDAR_1_PORT SCRAP_SIMULATOR_LIDAR_2_PORT; do
+    if [[ -v "$removed_name" ]] \
+        || grep -Eq "^[[:space:]]*${removed_name}[[:space:]]*=" "$server_environment"; then
+        echo "$removed_name is removed; use SCRAP_SIMULATOR_LIDAR_PORT" >&2
+        exit 1
+    fi
+done
+
 validate_server_configuration() {
     jq -e '
         def ipv4:
@@ -63,25 +71,6 @@ if ! validate_server_configuration <<<"$server_configuration"; then
     echo "server LiDAR deployment contract is invalid" >&2
     exit 1
 fi
-
-for removed_name in SCRAP_SIMULATOR_LIDAR_1_PORT SCRAP_SIMULATOR_LIDAR_2_PORT; do
-    removed_error="$(mktemp)"
-    if env -u SCRAP_SIMULATOR_LIDAR_1_PORT -u SCRAP_SIMULATOR_LIDAR_2_PORT \
-        "$removed_name=8089" \
-        docker compose --env-file "$server_environment" --file "$server_compose" \
-            config --quiet 2>"$removed_error"; then
-        echo "removed deployment variable was accepted: $removed_name" >&2
-        rm -f "$removed_error"
-        exit 1
-    fi
-    if ! grep -Fq "$removed_name is removed" "$removed_error"; then
-        echo "removed deployment variable did not produce a migration error: $removed_name" >&2
-        cat "$removed_error" >&2
-        rm -f "$removed_error"
-        exit 1
-    fi
-    rm -f "$removed_error"
-done
 
 for environment_file in "$server_environment" "$edge_environment"; do
     while IFS='=' read -r name value; do

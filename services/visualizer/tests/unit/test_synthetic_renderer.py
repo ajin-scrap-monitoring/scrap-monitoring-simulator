@@ -26,6 +26,7 @@ from scrap_monitoring_visualizer.synthetic_camera.renderer import (
     _chute_pose,
     _fixed_conveyor_poly_data,
     _joint_length_m,
+    _validate_render_device,
     _validate_render_window,
     camera_placement,
 )
@@ -571,10 +572,84 @@ def test_disabled_camera_effects_return_source_without_copy() -> None:
 
 def test_explicit_renderer_backend_checks_actual_window() -> None:
     config = SyntheticCameraConfig.from_file()
-    _validate_render_window(config, "vtkEGLRenderWindow")
+    auto_config = replace(config, backend="auto")
+    _validate_render_window(auto_config, "vtkEGLRenderWindow")
+    _validate_render_window(auto_config, "vtkOSOpenGLRenderWindow")
     with pytest.raises(RuntimeError, match="unexpected window"):
-        _validate_render_window(config, "vtkXOpenGLRenderWindow")
+        _validate_render_window(auto_config, "vtkXOpenGLRenderWindow")
+    with pytest.raises(RuntimeError, match="unexpected window"):
+        _validate_render_window(replace(config, backend="osmesa"), "vtkEGLRenderWindow")
     with pytest.raises(RuntimeError, match="unexpected window"):
         _validate_render_window(
             replace(config, backend="egl"), "vtkOSOpenGLRenderWindow"
         )
+
+
+def test_explicit_egl_backend_requires_nvidia_opengl_device() -> None:
+    config = replace(SyntheticCameraConfig.from_file(), backend="egl")
+    capabilities = "\n".join(
+        (
+            "OpenGL vendor string: NVIDIA Corporation",
+            "OpenGL renderer string: NVIDIA RTX 4000 Ada Generation",
+            "OpenGL version string: 4.6.0 NVIDIA 580.82.07",
+        )
+    )
+
+    _validate_render_device(
+        config,
+        supports_opengl=True,
+        capabilities=capabilities,
+    )
+
+
+@pytest.mark.parametrize(
+    ("supports_opengl", "capabilities", "message"),
+    (
+        (
+            False,
+            "OpenGL vendor string: NVIDIA Corporation\n"
+            "OpenGL renderer string: NVIDIA RTX 4000 Ada Generation",
+            "does not support OpenGL",
+        ),
+        (
+            True,
+            "OpenGL vendor string: Mesa/X.org\n"
+            "OpenGL renderer string: NVIDIA RTX 4000 Ada Generation",
+            "requires an NVIDIA OpenGL vendor and renderer",
+        ),
+        (
+            True,
+            "OpenGL vendor string: NVIDIA Corporation\n"
+            "OpenGL renderer string: llvmpipe (LLVM 15.0.6, 256 bits)",
+            "requires an NVIDIA OpenGL vendor and renderer",
+        ),
+        (
+            True,
+            "OpenGL vendor string: NVIDIA Corporation",
+            "did not report OpenGL renderer string",
+        ),
+    ),
+)
+def test_explicit_egl_backend_rejects_missing_or_software_device(
+    supports_opengl: bool,
+    capabilities: str,
+    message: str,
+) -> None:
+    config = replace(SyntheticCameraConfig.from_file(), backend="egl")
+
+    with pytest.raises(RuntimeError, match=message):
+        _validate_render_device(
+            config,
+            supports_opengl=supports_opengl,
+            capabilities=capabilities,
+        )
+
+
+def test_cpu_backend_does_not_require_nvidia_capabilities() -> None:
+    config = replace(SyntheticCameraConfig.from_file(), backend="osmesa")
+
+    _validate_render_device(
+        config,
+        supports_opengl=True,
+        capabilities="OpenGL vendor string: Mesa/X.org",
+    )

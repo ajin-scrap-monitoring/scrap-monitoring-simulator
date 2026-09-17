@@ -2,7 +2,7 @@
 
 실제 edge platform의 Light Detection and Ranging (LiDAR)과 camera 입력 경계를 검증하는 개발용
 통합 simulation system이다. 하나의 canonical scene에서 RPLIDAR S2E 호환 User Datagram
-Protocol (UDP) scan 2개, 30 Frames Per Second (FPS) Browser 시각화와 합성 camera stream을
+Protocol (UDP) scan 2개, 30 Frames Per Second (FPS) Browser 시각화와 synthetic camera stream을
 생성한다.
 
 ## 주요 기능
@@ -10,8 +10,8 @@ Protocol (UDP) scan 2개, 30 Frames Per Second (FPS) Browser 시각화와 합성
 | Service | 경로 | 책임 |
 | --- | --- | --- |
 | Simulation server | `services/simulation-server` | Canonical scene, 10 Hz 적재면과 S2E UDP endpoint 2개 |
-| Visualizer | `services/visualizer` | WebGL 3D model, 합성 camera stream과 Browser page |
-| Camera edge bridge | `services/camera-edge-bridge` | 합성 Motion JPEG (MJPEG)를 ARM64 Video4Linux2 (V4L2) device에 기록 |
+| Visualizer | `services/visualizer` | WebGL 3D model, synthetic camera stream과 Browser page |
+| Camera edge bridge | `services/camera-edge-bridge` | synthetic camera MJPEG stream을 ARM64 Video4Linux2 (V4L2) device에 기록 |
 
 실제 LiDAR Software Development Kit (SDK) driver와 처리 서비스는 `ajin-edge-platform`이
 소유한다.

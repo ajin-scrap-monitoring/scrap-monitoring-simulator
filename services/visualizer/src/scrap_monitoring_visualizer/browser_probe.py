@@ -24,10 +24,15 @@ class BrowserProbeResult:
     stable_samples: int
     total_samples: int
     source_fps: float
-    network_fps: float
+    source_publish_fps: float
+    received_fps: float
+    decoded_fps: float
     presented_fps: float
     received_frames: int
+    decoded_frames: int
     presented_frames: int
+    decode_duration_ms: float
+    decode_duration_max_ms: float
     dropped_before_decode: int
     dropped_before_present: int
     decode_errors: int
@@ -149,7 +154,13 @@ async def _metrics(websocket: Any, command_id: int) -> dict[str, Any] | None:
 async def _prepare_page(websocket: Any) -> int:
     await _cdp_command(websocket, 1, "Runtime.enable")
     await _cdp_command(websocket, 2, "Page.bringToFront")
-    return 2
+    await _cdp_command(
+        websocket,
+        3,
+        "Emulation.setFocusEmulationEnabled",
+        {"enabled": True},
+    )
+    return 3
 
 
 async def _page_state(websocket: Any, command_id: int) -> BrowserPageState:
@@ -225,6 +236,38 @@ def _section(metrics: dict[str, Any], name: str) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
+def _status_url(page_url: str) -> str:
+    parsed = urllib.parse.urlsplit(page_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError("Browser page URL must be an HTTP URL")
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "/status", "", ""))
+
+
+def _source_metrics(status_url: str) -> dict[str, float]:
+    status = _http_json(status_url)
+    synthetic_camera = status.get("synthetic_camera")
+    if not isinstance(synthetic_camera, dict):
+        raise RuntimeError("Visualizer status is missing synthetic_camera")
+    camera = cast(dict[str, Any], synthetic_camera)
+    return {
+        "rendered_fps": _number(camera, "camera_source_fps"),
+        "published_fps": _number(camera, "camera_publish_fps"),
+    }
+
+
+async def _metrics_with_source(
+    websocket: Any,
+    command_id: int,
+    status_url: str,
+) -> dict[str, Any] | None:
+    metrics = await _metrics(websocket, command_id)
+    if metrics is None or "source" in metrics:
+        return metrics
+    result = dict(metrics)
+    result["source"] = await asyncio.to_thread(_source_metrics, status_url)
+    return result
+
+
 def _validate_result(result: BrowserProbeResult) -> None:
     if result.total_samples <= 0:
         raise RuntimeError("Browser camera probe collected no samples")
@@ -234,7 +277,8 @@ def _validate_result(result: BrowserProbeResult) -> None:
             f"{json.dumps(asdict(result), sort_keys=True)}"
         )
     if (
-        result.network_fps < result.minimum_fps
+        result.source_fps < result.minimum_fps
+        or result.received_fps < result.minimum_fps
         or result.presented_fps < result.minimum_fps
     ):
         raise RuntimeError(
@@ -301,6 +345,7 @@ def _summarize_samples(
     latest = samples[-1]
     measured_duration_s = _elapsed_s(baseline, latest)
     received_frames = _counter_delta(baseline, latest, "network", "received_frames")
+    decoded_frames = _counter_delta(baseline, latest, "browser", "decoded_frames")
     presented_frames = _counter_delta(baseline, latest, "browser", "presented_frames")
     window_s = _number(baseline, "window_s")
     if window_s <= 0.0:
@@ -323,13 +368,13 @@ def _summarize_samples(
         sample_elapsed_s = _elapsed_s(start, end)
         minimum_frames = math.floor(minimum_fps * sample_elapsed_s)
         source_stable = _number(_section(end, "source"), "rendered_fps") >= minimum_fps
-        network_stable = (
+        received_stable = (
             _counter_delta(start, end, "network", "received_frames") >= minimum_frames
         )
         browser_stable = (
             _counter_delta(start, end, "browser", "presented_frames") >= minimum_frames
         )
-        stable_samples += source_stable and network_stable and browser_stable
+        stable_samples += source_stable and received_stable and browser_stable
         total_samples += 1
 
     if total_samples == 0:
@@ -343,10 +388,17 @@ def _summarize_samples(
         stable_samples=stable_samples,
         total_samples=total_samples,
         source_fps=_number(_section(latest, "source"), "rendered_fps"),
-        network_fps=received_frames / measured_duration_s,
+        source_publish_fps=_number(_section(latest, "source"), "published_fps"),
+        received_fps=received_frames / measured_duration_s,
+        decoded_fps=decoded_frames / measured_duration_s,
         presented_fps=presented_frames / measured_duration_s,
         received_frames=received_frames,
+        decoded_frames=decoded_frames,
         presented_frames=presented_frames,
+        decode_duration_ms=_number(_section(latest, "browser"), "decode_duration_ms"),
+        decode_duration_max_ms=_number(
+            _section(latest, "browser"), "decode_duration_max_ms"
+        ),
         dropped_before_decode=_counter_delta(
             baseline, latest, "browser", "dropped_before_decode"
         ),
@@ -358,13 +410,13 @@ def _summarize_samples(
             baseline, latest, "browser", "target_mismatches"
         ),
         max_pending_decode=max(
-            round(_number(queues, "pending_decode")) for queues in queue_samples
+            round(_number(queues, "max_pending_decode")) for queues in queue_samples
         ),
         max_decode_inflight=max(
-            round(_number(queues, "decode_inflight")) for queues in queue_samples
+            round(_number(queues, "max_decode_inflight")) for queues in queue_samples
         ),
         max_pending_present=max(
-            round(_number(queues, "pending_present")) for queues in queue_samples
+            round(_number(queues, "max_pending_present")) for queues in queue_samples
         ),
     )
     _validate_result(result)
@@ -375,12 +427,14 @@ async def run_probe(
     cdp_url: str,
     page_url: str,
     *,
+    status_url: str | None = None,
     duration_s: int,
     minimum_fps: float,
     minimum_stable_ratio: float,
     readiness_timeout_s: float = 30.0,
 ) -> BrowserProbeResult:
     target_id, websocket_url = _open_target(cdp_url, page_url)
+    source_status_url = status_url or _status_url(page_url)
     try:
         async with connect(
             websocket_url,
@@ -395,7 +449,9 @@ async def run_probe(
             deadline = asyncio.get_running_loop().time() + readiness_timeout_s
             while True:
                 command_id += 1
-                metrics = await _metrics(websocket, command_id)
+                metrics = await _metrics_with_source(
+                    websocket, command_id, source_status_url
+                )
                 if metrics is not None:
                     source = _section(metrics, "source")
                     network = _section(metrics, "network")
@@ -414,7 +470,9 @@ async def run_probe(
             command_id += 1
             _validate_page_state(await _page_state(websocket, command_id))
             command_id += 1
-            baseline = await _metrics(websocket, command_id)
+            baseline = await _metrics_with_source(
+                websocket, command_id, source_status_url
+            )
             if baseline is None:
                 raise RuntimeError("Browser camera metrics disappeared")
             samples: list[dict[str, Any]] = []
@@ -423,7 +481,9 @@ async def run_probe(
                 command_id += 1
                 _validate_page_state(await _page_state(websocket, command_id))
                 command_id += 1
-                sample = await _metrics(websocket, command_id)
+                sample = await _metrics_with_source(
+                    websocket, command_id, source_status_url
+                )
                 if sample is None:
                     raise RuntimeError("Browser camera metrics disappeared")
                 samples.append(sample)
@@ -443,6 +503,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cdp-url", default="http://127.0.0.1:9222")
     parser.add_argument("--page-url", required=True)
+    parser.add_argument("--status-url")
     parser.add_argument("--duration", type=int, default=60)
     parser.add_argument("--minimum-fps", type=float, default=27.0)
     parser.add_argument("--minimum-stable-ratio", type=float, default=0.9)
@@ -458,6 +519,7 @@ def main() -> None:
             run_probe(
                 args.cdp_url,
                 args.page_url,
+                status_url=args.status_url,
                 duration_s=args.duration,
                 minimum_fps=args.minimum_fps,
                 minimum_stable_ratio=args.minimum_stable_ratio,

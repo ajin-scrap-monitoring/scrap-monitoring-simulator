@@ -15,7 +15,7 @@
 Simulation Core
 |-- S2E UDP Adapter -------------------------------> Edge LiDAR Driver
 `-- Latest Scene v2 Segment -> Visualizer
-    `-- Target Scheduler -> CPU Raster -> JPEG
+    `-- Target Scheduler -> VTK Raster -> CPU JPEG
         |-- Paired Visual Stream -> WebGL Model + Camera -> Browser
         `-- Raw Camera Stream ----------------------> Edge Bridge -> V4L2
 ```
@@ -26,7 +26,7 @@ Simulation Core만 scene과 simulation clock을 변경한다. S2E adapter와 Vis
 
 Simulation Core와 S2E adapter는 하나의 Rust process에서 실행한다. Sensor별 scan 계산은 독립 worker가 담당하고 sensor별 UDP actor는 별도 socket과 protocol 상태를 소유한다.
 
-Visualizer는 Python server process, synthetic camera render worker와 Browser WebGL client로 구성한다. FastAPI는 Hypertext Transfer Protocol (HTTP), WebSocket I/O와 static page 제공을 담당한다. VTK rendering과 JPEG encoding은 별도 process가 수행하고 WebGL은 Browser GPU에서 model surface를 rendering한다.
+Visualizer는 Python server process, synthetic camera render worker와 Browser WebGL client로 구성한다. FastAPI는 Hypertext Transfer Protocol (HTTP), WebSocket I/O와 static page 제공을 담당한다. Render worker는 OSMesa 또는 EGL Visualization Toolkit (VTK) rendering을 수행하고 CPU가 effect, resize와 JPEG encoding을 수행한다. WebGL은 Browser GPU에서 model surface를 rendering한다.
 
 두 server process는 bounded latest-only Transmission Control Protocol (TCP) scene stream으로 연결한다. Visualizer가 느리거나 종료돼도 Simulation Core와 S2E UDP endpoint는 계속 동작한다. Render worker, visual stream과 Browser decode queue는 각각 최신 항목 1개만 유지한다.
 
@@ -44,7 +44,7 @@ Runtime은 5개 시간 경계로 구성한다.
 
 각 LiDAR point는 sensor별 32,000 samples/s schedule에 따라 timestamp를 가진다. Simulation Core는 point timestamp 이하인 가장 최근 10 Hz keyframe을 선택하므로 한 keyframe 구간의 측정 표면은 piecewise-constant다. LiDAR 측정은 camera와 Browser target 생성에 의존하지 않는다.
 
-Visualizer는 integer target id로 30 FPS target time을 정한다. 새 segment가 도착하면 이전 segment의 마지막 target만 제출하고 과거 target을 따라 생성하지 않는다. Camera renderer가 완료한 JPEG와 같은 target의 Float32 surface 배열은 하나의 binary packet으로 Browser에 전달된다. Browser는 JPEG를 960 x 540 backing canvas 크기로 decode하고 WebGL update와 camera bitmap presentation을 같은 `requestAnimationFrame` callback에서 실행한다.
+Visualizer는 integer target id로 30 FPS target time을 정한다. 새 segment가 도착하면 이전 segment의 마지막 target만 제출하고 과거 target을 따라 생성하지 않는다. Target scheduler는 queue reader event와 다음 target deadline으로 대기하므로 polling delay를 추가하지 않는다. Camera renderer가 완료한 JPEG와 같은 target의 Float32 surface 배열은 하나의 binary packet으로 Browser에 전달된다. Browser는 1920 x 1080 JPEG를 960 x 540 backing canvas 크기로 decode하고 WebGL update와 camera bitmap presentation을 같은 `requestAnimationFrame` callback에서 실행한다.
 
 ## Camera와 Browser frame 흐름
 
@@ -54,16 +54,18 @@ Visualizer는 integer target id로 30 FPS target time을 정한다. 새 segment�
 | --- | --- | --- |
 | 1 | Scene source | 인접 keyframe segment 수신 |
 | 2 | Target scheduler | 30 FPS target id, deadline과 latest-only 교체 |
-| 3 | Camera renderer | 576 x 324 CPU raster, 1920 x 1080 JPEG |
+| 3 | Camera renderer | 576 x 324 VTK raster, CPU effect, 1920 x 1080 JPEG |
 | 4 | Paired visual stream | target metadata, Float32 heights와 JPEG 전송 |
 | 5 | Browser | WebGL surface update와 camera bitmap 동시 presentation |
 | 6 | Edge V4L2 | Raw MJPEG stream, device sequence와 monotonic EOF timestamp |
 
 Paired visual stream은 Browser 전용이다. `/visual/v1/stream`은 descriptor 뒤에 big-endian JSON metadata 길이, JSON metadata, little-endian Float32 heights와 JPEG를 전송한다. Raw `/camera/v1/stream`은 ARM64 edge bridge의 기존 MJPEG 계약을 유지한다.
 
-Synthetic camera renderer가 1920 x 1080, 30 FPS MJPEG를 생성하며 camera edge bridge는 해상도와 encoding을 변경하지 않고 V4L2 device에 기록한다. `ajin-edge-platform`의 camera-edge는 같은 해상도, FPS와 format을 V4L2에 요청하고 JPEG packet을 변환 없이 전송한다. 실제 camera의 낮은 해상도 profile 생성은 camera 내부 ISP와 encoder의 책임이고 edge platform은 장비가 제공하는 profile을 선택한다. 장비가 제공하지 않는 해상도의 software resize와 re-encode는 이 Repository의 책임이 아니다.
+Synthetic camera renderer가 JPEG quality 60의 1920 x 1080, 30 FPS MJPEG를 한 번 생성한다. Paired visual stream과 raw camera stream은 같은 JPEG와 target id를 사용한다. Camera edge bridge는 해상도와 encoding을 변경하지 않고 V4L2 device에 기록한다. `ajin-edge-platform`의 camera-edge는 같은 해상도, FPS와 format을 V4L2에 요청하고 JPEG packet을 변환 없이 전송한다. 실제 camera의 낮은 해상도 profile 생성은 camera 내부 ISP와 encoder의 책임이고 edge platform은 장비가 제공하는 profile을 선택한다. 장비가 제공하지 않는 해상도의 software resize와 re-encode는 이 Repository의 책임이 아니다.
 
 Browser는 하나의 foreground client만 허용한다. Raw camera stream은 edge consumer를 위해 별도 연결 상한을 가진다. Browser가 느리면 최신 packet만 남기며 server rendering과 LiDAR output을 지연시키지 않는다.
+
+`/status`는 source와 publish FPS, worker idle, IPC와 camera stage 시간을 제공한다. Browser metrics는 receive, decode, presentation FPS와 각 latest-only queue의 현재 및 최대 깊이, drop, decode error와 target mismatch를 제공한다. Browser metrics의 source FPS는 `/status` 값과 혼용하지 않는다.
 
 ## Repository 경계
 

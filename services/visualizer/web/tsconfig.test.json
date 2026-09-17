@@ -4,5 +4,5 @@
     "rootDir": ".",
     "outDir": ".test-dist"
   },
-  "include": ["src/bitmap.ts", "src/geometry.ts", "src/protocol.ts", "src/presentation.ts", "src/resources.ts", "tests/**/*.ts"]
+  "include": ["src/bitmap.ts", "src/geometry.ts", "src/metrics.ts", "src/protocol.ts", "src/presentation.ts", "src/resources.ts", "tests/**/*.ts"]
 }

@@ -24,6 +24,14 @@ docker compose --env-file deploy/server/.env \
   --file deploy/server/compose.yml up --detach
 ```
 
+NVIDIA GPU를 사용하는 Server는 `compose.gpu.yml` overlay를 추가한다. 이 overlay는 Visualizer의 VTK rendering만 EGL로 실행하고 Simulation Core, LiDAR, effect, resize와 JPEG encoding은 CPU에 유지한다.
+
+```bash
+docker compose --env-file deploy/server/.env \
+  --file deploy/server/compose.yml \
+  --file deploy/server/compose.gpu.yml up --detach
+```
+
 Browser는 설정한 HTTP port를 사용한다. LiDAR SDK client는 서로 다른 Server IPv4 주소에 공통 UDP
 port 8089로 연결한다. `.env.example`의 `127.0.0.2`와 `127.0.0.3`은 공개 loopback 예시이며
 외부 SDK client를 연결할 때는 Server interface에 실제로 설정한 두 주소로 교체한다. Compose는
@@ -56,7 +64,7 @@ scripts/server-health-guard.sh \
 
 Guard는 preflight에서 temperature sensor, load, CPU PSI, memory와 swap의 기준을 확인한다. `SCRAP_SIMULATOR_HEALTH_REQUIRE_TEMPERATURE=false`을 명시하지 않으면 temperature sensor를 읽지 못한 host에서는 수락을 시작하지 않는다. Soak 중 temperature, 지속 load 또는 PSI, memory, swap 증가, tracked container unhealthy, restart와 OOM을 감지하면 guarded process group만 중지한다. Guard는 다른 Container나 process를 중지하지 않는다.
 
-Browser probe는 5분 동안 model과 camera presentation이 각각 27 FPS 이상이고 5초 안정 창의 90 percent 이상이 기준을 만족하는지 확인한다. Target mismatch와 decode error는 0이어야 하고 pending decode, decode in-flight, pending presentation은 각각 1 이하여야 한다. 같은 실행에서 공식 SDK sensor 2대의 HQ scan 수신과 edge V4L2 90 frame 검사를 완료한다.
+Browser probe는 5분 동안 Server source, Browser camera와 model presentation이 각각 27 FPS 이상이고 5초 안정 창의 90 percent 이상이 기준을 만족하는지 확인한다. Source와 publish cadence 및 render stage는 `/status`로, receive, decode와 presentation은 Browser metrics로 확인한다. Target mismatch와 decode error는 0이어야 하고 pending decode, decode in-flight, pending presentation은 각각 1 이하여야 한다. GPU overlay 수락은 같은 scene seed에서 OSMesa와 EGL을 순차 비교하고 GPU utilization, memory와 temperature를 health guard 결과에 함께 확인한다. 같은 실행에서 공식 SDK sensor 2대의 HQ scan 수신과 edge V4L2 90 frame 검사를 완료한다.
 
 ## Edge 배포
 

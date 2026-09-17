@@ -2,13 +2,13 @@
 
 ## 직접 의존성
 
-Repository가 직접 선택한 의존성은 다음 5개 묶음, 50개 표 항목이다. Service별 표에서 같은
+Repository가 직접 선택한 의존성은 다음 5개 묶음, 52개 표 항목이다. Service별 표에서 같은
 toolchain을 각각 사용하는 경우에는 각 service 항목으로 센다.
 
 | 묶음 | 항목 수 |
 | --- | --- |
 | Simulation server | 11 |
-| Visualizer runtime | 15 |
+| Visualizer runtime | 17 |
 | Camera edge bridge | 6 |
 | Package build와 검증 | 9 |
 | GitHub Actions와 image build | 9 |
@@ -40,13 +40,15 @@ RPLIDAR SDK는 test stage에서만 build하며 Simulation server runtime image�
 | jsonschema | 4.26.0 | Versioned scene 계약 검증 | [PyPI](https://pypi.org/project/jsonschema/4.26.0/) | MIT |
 | NumPy | 2.5.3 | 격자, mesh와 image 효과 수치 배열 | [PyPI](https://pypi.org/project/numpy/2.5.3/) | BSD-3-Clause |
 | Pillow | 12.3.0 | JPEG memory encoding | [PyPI](https://pypi.org/project/pillow/12.3.0/) | MIT-CMU |
-| PyVista | 0.49.0 | 합성 camera VTK scene과 off-screen rendering 경계 | [PyPI](https://pypi.org/project/pyvista/0.49.0/) | MIT |
+| PyVista | 0.49.0 | synthetic camera VTK scene과 off-screen rendering 경계 | [PyPI](https://pypi.org/project/pyvista/0.49.0/) | MIT |
 | Uvicorn | 0.52.4 | HTTP와 WebSocket ASGI server | [PyPI](https://pypi.org/project/uvicorn/0.52.4/) | BSD-3-Clause |
 | websockets | 17.1 | Uvicorn WebSocket protocol runtime | [PyPI](https://pypi.org/project/websockets/17.1/) | BSD-3-Clause |
-| VTK | 9.7.0 | 합성 camera 원근 3D rendering | [PyPI](https://pypi.org/project/vtk/9.7.0/) | BSD-3-Clause |
+| VTK | 9.7.0 | synthetic camera 원근 3D rendering | [PyPI](https://pypi.org/project/vtk/9.7.0/) | BSD-3-Clause |
 | Mesa `libosmesa6` | 22.3.6-1+deb12u2 | CPU off-screen OpenGL context | [Debian](https://packages.debian.org/bookworm/libosmesa6) | MIT 및 구성 요소별 라이선스 |
 | GLVND `libegl1` | 1.6.0-1 | EGL vendor-neutral dispatch | [Debian](https://packages.debian.org/bookworm/libegl1) | MIT 및 구성 요소별 라이선스 |
 | GLVND `libgl1` | 1.6.0-1 | OpenGL vendor-neutral dispatch | [Debian](https://packages.debian.org/bookworm/libgl1) | MIT 및 구성 요소별 라이선스 |
+| GLVND `libglvnd0` | 1.6.0-1 | EGL과 OpenGL dispatch runtime | [Debian](https://packages.debian.org/bookworm/libglvnd0) | MIT 및 구성 요소별 라이선스 |
+| GLVND `libopengl0` | 1.6.0-1 | OpenGL API dispatch runtime | [Debian](https://packages.debian.org/bookworm/libopengl0) | MIT 및 구성 요소별 라이선스 |
 | Node.js | 24 | Browser bundle build | [Node.js](https://nodejs.org/) | MIT |
 | Three.js | 0.180.0 | Browser WebGL 3D model | [Three.js](https://github.com/mrdoob/three.js) | MIT |
 | TypeScript | 5.9.2 | Browser protocol과 rendering source compile | [TypeScript](https://github.com/microsoft/TypeScript) | Apache-2.0 |

@@ -9,7 +9,7 @@
 | Scene 계약 | v2 static definition과 인접 dynamic segment | Schema fixture와 strict parser |
 | Simulation server | Canonical scene, 10 Hz surface, 서로 다른 IPv4 주소와 공통 UDP 8089의 sensor endpoint 2개 | 결정론, geometry와 공식 SDK 수락 |
 | Browser | 30 FPS WebGL model, camera 재질, inlet 수직 guide와 paired camera | Web protocol test와 Browser probe |
-| Synthetic camera | Integer target scheduler, 576 x 324 raster와 1920 x 1080 MJPEG | 고유 frame, target identity와 latest-only queue |
+| Synthetic camera | Event-driven target scheduler, OSMesa 또는 NVIDIA EGL 576 x 324 raster, CPU JPEG quality 60의 1920 x 1080 MJPEG | 고유 frame, target identity, stage timing과 latest-only queue |
 | Edge bridge | ARM64 raw camera client와 V4L2 writer | Descriptor, JPEG, cadence와 device 검사 |
 | Build와 release | 병렬 AMD64 및 ARM64 build, service별 cache와 OCI 게시 | Container test, digest, SBOM과 provenance |
 
@@ -19,7 +19,7 @@
 
 1. `scripts/check.sh`로 static, AMD64, ARM64 Container build와 test를 완료한다.
 2. Server에서 health guard preflight를 통과한 release image로 Simulation server와 Visualizer를 실행한다.
-3. 전경 Chrome Browser에서 5분 동안 model과 camera가 각각 27 FPS 이상이고 target mismatch, decode error와 queue 초과가 없는지 확인한다.
+3. 전경 Chrome Browser에서 5분 동안 source, model과 camera가 각각 27 FPS 이상이고 target mismatch, decode error와 queue 초과가 없는지 확인한다. NVIDIA Server는 OSMesa와 EGL을 순차 검증한다.
 4. 같은 실행에서 공식 SDK sensor 2대의 HQ scan 수신과 ARM64 V4L2 90 frame 검사를 완료한다.
 5. Pull Request CI, CodeQL default setup, squash merge와 immutable version release를 완료한다.
 

@@ -1,7 +1,3 @@
-x-removed-environment-guards:
-  lidar-1-port: "${SCRAP_SIMULATOR_LIDAR_1_PORT+${SCRAP_SIMULATOR_ACK_REMOVED_LIDAR_PORT_VARIABLES:?SCRAP_SIMULATOR_LIDAR_1_PORT is removed; use SCRAP_SIMULATOR_LIDAR_PORT}}"
-  lidar-2-port: "${SCRAP_SIMULATOR_LIDAR_2_PORT+${SCRAP_SIMULATOR_ACK_REMOVED_LIDAR_PORT_VARIABLES:?SCRAP_SIMULATOR_LIDAR_2_PORT is removed; use SCRAP_SIMULATOR_LIDAR_PORT}}"
-
 services:
   simulation-server:
     container_name: scrap-monitoring-simulator-server
