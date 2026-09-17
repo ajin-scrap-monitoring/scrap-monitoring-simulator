@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "scrap-monitoring-visualizer"
-version = "0.3.0"
+version = "0.3.1"
 description = "Headless renderer for Scrap Monitoring LiDAR scene frames"
 requires-python = "==3.14.*"
 dependencies = [
