@@ -3,7 +3,7 @@ variable "BUILD_REVISION" {
 }
 
 variable "BUILD_VERSION" {
-  default = "0.3.1"
+  default = "0.3.2"
 }
 
 variable "SCRAP_SIMULATOR_TEST_SERVER_IMAGE" {

@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "scrap-monitoring-simulation-server"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "clap",
  "num-bigint",

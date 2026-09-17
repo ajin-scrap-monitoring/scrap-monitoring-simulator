@@ -111,7 +111,7 @@ COPY --chown=visualizer:visualizer services/visualizer/licenses/THIRD_PARTY_NOTI
     /workspace/visualizer/licenses/THIRD_PARTY_NOTICES.html
 
 ARG BUILD_REVISION=unknown
-ARG BUILD_VERSION=0.3.1
+ARG BUILD_VERSION=0.3.2
 
 LABEL org.opencontainers.image.description="Canonical scene browser and synthetic camera renderer" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \
