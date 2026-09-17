@@ -13,7 +13,7 @@ script_dir="$(
 )"
 device="/dev/video42"
 
-packages=(v4l-utils v4l2loopback-dkms v4l2loopback-utils)
+packages=(ffmpeg v4l-utils v4l2loopback-dkms v4l2loopback-utils)
 if [[ ! -d "/lib/modules/$(uname -r)/build" ]]; then
   packages+=("linux-headers-$(uname -r)")
 fi

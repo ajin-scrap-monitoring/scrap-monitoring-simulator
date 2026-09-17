@@ -19,15 +19,16 @@ GitHub Release는 image digest 3개를 기록한 `oci-images.txt`와 `deploy/` a
 `deploy/server/.env.example`을 `.env`로 복사하고 zero digest를 release digest로 교체한다.
 
 ```bash
-scripts/check-deployment.sh deploy/server/.env
-docker compose --env-file deploy/server/.env \
+sudo docker compose --env-file deploy/server/.env \
+  --file deploy/server/compose.yml config --quiet
+sudo docker compose --env-file deploy/server/.env \
   --file deploy/server/compose.yml up --detach
 ```
 
 NVIDIA GPU를 사용하는 Server는 `compose.gpu.yml` overlay를 추가한다. 이 overlay는 Visualizer의 VTK rendering만 EGL로 실행하고 Simulation Core, LiDAR, effect, resize와 JPEG encoding은 CPU에 유지한다.
 
 ```bash
-docker compose --env-file deploy/server/.env \
+sudo docker compose --env-file deploy/server/.env \
   --file deploy/server/compose.yml \
   --file deploy/server/compose.gpu.yml up --detach
 ```
@@ -45,7 +46,8 @@ Server 통합 probe는 설정한 release image로 임시 Container를 실행해 
 set -a
 . deploy/server/.env
 set +a
-SCRAP_SIMULATOR_TEST_SERVER_IMAGE="$SCRAP_SIMULATION_SERVER_IMAGE" \
+sudo env \
+  SCRAP_SIMULATOR_TEST_SERVER_IMAGE="$SCRAP_SIMULATION_SERVER_IMAGE" \
   SCRAP_SIMULATOR_TEST_VISUALIZER_IMAGE="$SCRAP_SIMULATOR_VISUALIZER_IMAGE" \
   scripts/check.sh amd64-runtime
 ```
@@ -53,7 +55,7 @@ SCRAP_SIMULATOR_TEST_SERVER_IMAGE="$SCRAP_SIMULATION_SERVER_IMAGE" \
 실제 Browser 수락 검사는 Mac Chrome과 Ubuntu Server의 release Visualizer image 사이에서 Chrome DevTools Protocol (CDP)로 수행한다. Chrome은 별도 임시 profile, remote debugging port, 전경 window를 사용한다. Server는 release image 실행 전과 실행 중 `scripts/server-health-guard.sh`로 열, load, CPU Pressure Stall Information (PSI), available memory, swap과 검증 대상 container 상태를 기록한다.
 
 ```bash
-scripts/server-health-guard.sh \
+sudo scripts/server-health-guard.sh \
   --container scrap-monitoring-simulator-server \
   --container scrap-monitoring-simulator-visualizer \
   --preflight-seconds 60 \
@@ -73,24 +75,26 @@ ARM64 host에서 `deploy/edge/setup-v4l2loopback.sh`를 root로 한 번 실행�
 `deploy/edge/.env.example`을 `.env`로 복사하고 image digest, Visualizer URL과 host video group identifier를 설정한다.
 
 ```bash
-docker compose --env-file deploy/edge/.env \
+sudo docker compose --env-file deploy/edge/.env \
+  --file deploy/edge/compose.yml config --quiet
+sudo docker compose --env-file deploy/edge/.env \
   --file deploy/edge/compose.yml up --detach
 ```
 
 Stream 연결 후 host에서 90개 frame의 format, cadence, decode, sequence와 monotonic EOF timestamp를 검사한다.
 
 ```bash
-deploy/edge/check-90-frames.sh /dev/scrap-synthetic-camera
+sudo deploy/edge/check-90-frames.sh /dev/scrap-synthetic-camera
 ```
 
 ## 로컬 검증
 
 | 명령 | 검증 경계 |
 | --- | --- |
-| `scripts/check.sh static` | Repository 구조, Compose, 문서와 workflow |
-| `scripts/check.sh amd64` | Simulation server, Visualizer와 통합 probe |
-| `scripts/check.sh arm64` | Camera edge bridge build, test와 runtime smoke test |
-| `scripts/check.sh` | 두 architecture를 포함한 전체 검사 |
+| `sudo scripts/check.sh static` | Repository 구조, Compose, 문서와 workflow |
+| `sudo scripts/check.sh amd64` | Simulation server, Visualizer와 통합 probe |
+| `sudo scripts/check.sh arm64` | Camera edge bridge build, test와 runtime smoke test |
+| `sudo scripts/check.sh` | 두 architecture를 포함한 전체 검사 |
 
 무인자 실행은 static 검사와 service 3개의 Bake build를 병렬 실행하고, build 완료 뒤 AMD64 runtime probe와 ARM64 smoke test를 병렬 실행한다. Rust Dockerfile은 service와 architecture별 Cargo cache를 사용한다. Visualizer Dockerfile은 Node와 Python dependency layer를 source layer와 분리한다.
 

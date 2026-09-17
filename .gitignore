@@ -12,3 +12,4 @@ build/
 !.env.example
 docs/internal/*
 !docs/internal/README.md
+scrap
