@@ -19,6 +19,7 @@ def test_live_parser_reads_environment_configuration() -> None:
             "SCRAP_MONITORING_VISUALIZER_HTTP_PORT": "18000",
             "SCRAP_MONITORING_VISUALIZER_CAMERA_ENABLED": "true",
             "SCRAP_MONITORING_VISUALIZER_CAMERA_BACKEND": "egl",
+            "SCRAP_MONITORING_VISUALIZER_CAMERA_NATIVE_RASTER": "true",
         }
     )
 
@@ -30,6 +31,7 @@ def test_live_parser_reads_environment_configuration() -> None:
     assert args.http_port == 18000
     assert args.camera_enabled is True
     assert args.camera_backend == "egl"
+    assert args.camera_native_raster is True
 
 
 def test_live_parser_uses_camera_defaults() -> None:
@@ -47,6 +49,7 @@ def test_live_parser_uses_camera_defaults() -> None:
     assert args.camera_enabled is False
     assert args.camera_profile is None
     assert args.camera_backend is None
+    assert args.camera_native_raster is False
 
 
 def test_cli_arguments_override_environment_configuration() -> None:

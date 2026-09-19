@@ -25,7 +25,7 @@ sudo docker compose --env-file deploy/server/.env \
   --file deploy/server/compose.yml up --detach
 ```
 
-NVIDIA GPU를 사용하는 Server는 `compose.gpu.yml` overlay를 추가한다. 이 overlay는 Visualizer의 VTK rendering만 EGL로 실행하고 Simulation Core, LiDAR, effect, resize와 JPEG encoding은 CPU에 유지한다.
+NVIDIA GPU를 사용하는 Server는 `compose.gpu.yml` overlay를 추가한다. 이 overlay는 Visualizer의 VTK rendering을 EGL 1920 x 1080 native raster로 실행하여 CPU resize 부하를 제거하고, Simulation Core, LiDAR, effect와 JPEG encoding은 CPU에 유지한다.
 
 ```bash
 sudo docker compose --env-file deploy/server/.env \

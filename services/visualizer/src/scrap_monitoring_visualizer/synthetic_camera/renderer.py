@@ -834,12 +834,18 @@ class VtkPbrRenderer:
         self._config = config
         self._topology = topology
         self._chute_pose = _chute_pose(header, frame, config.machine, interpolation)
-        self._scaler = _VtkBilinearScaler(
-            config.video.raster_width,
-            config.video.raster_height,
-            config.video.width,
-            config.video.height,
-        )
+        if (
+            config.video.raster_width == config.video.width
+            and config.video.raster_height == config.video.height
+        ):
+            self._scaler = None
+        else:
+            self._scaler = _VtkBilinearScaler(
+                config.video.raster_width,
+                config.video.raster_height,
+                config.video.width,
+                config.video.height,
+            )
         return plotter
 
     def _update_scene(
@@ -959,10 +965,12 @@ class VtkPbrRenderer:
         stage_seconds["effects"] = time.perf_counter() - stage_started_at
         scaler = self._scaler
         if scaler is None:
-            raise RuntimeError("renderer did not initialize the bilinear scaler")
-        stage_started_at = time.perf_counter()
-        output_image = Image.fromarray(scaler.resize(processed))
-        stage_seconds["resize"] = time.perf_counter() - stage_started_at
+            stage_seconds["resize"] = 0.0
+            output_image = Image.fromarray(processed)
+        else:
+            stage_started_at = time.perf_counter()
+            output_image = Image.fromarray(scaler.resize(processed))
+            stage_seconds["resize"] = time.perf_counter() - stage_started_at
         stage_started_at = time.perf_counter()
         output = BytesIO()
         output_image.save(

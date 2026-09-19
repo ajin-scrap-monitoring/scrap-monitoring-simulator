@@ -2,20 +2,20 @@
 
 ## 현재 구현 현황
 
-현재 `0.4.0` 구현은 6개 영역으로 구성한다.
+현재 `0.5.0` 구현은 6개 영역으로 구성한다.
 
 | 영역 | 현재 구현 | 검증 경계 |
 | --- | --- | --- |
 | Scene 계약 | v2 static definition과 인접 dynamic segment | Schema fixture와 strict parser |
 | Simulation server | Canonical scene, 10 Hz surface, 서로 다른 IPv4 주소와 공통 UDP 8089의 sensor endpoint 2개 | 결정론, geometry와 공식 SDK 수락 |
 | Browser | 30 FPS WebGL model, camera 재질, inlet 수직 guide와 paired camera | Web protocol test와 Browser probe |
-| Synthetic camera | Event-driven target scheduler, OSMesa 또는 NVIDIA EGL 576 x 324 raster, CPU JPEG quality 60의 1920 x 1080 MJPEG | 고유 frame, target identity, stage timing과 latest-only queue |
+| Synthetic camera | Event-driven target scheduler, OSMesa 또는 NVIDIA EGL(576 x 324 또는 1920 x 1080 native raster), CPU JPEG quality 60의 1920 x 1080 MJPEG | 고유 frame, target identity, stage timing과 latest-only queue |
 | Edge bridge | ARM64 raw camera client와 V4L2 writer | Descriptor, JPEG, cadence와 device 검사 |
 | Build와 release | 병렬 AMD64 및 ARM64 build, service별 cache와 OCI 게시 | Container test, digest, SBOM과 provenance |
 
 ## 수락과 release 순서
 
-`v0.4.0` release는 다음 5단계를 완료 조건으로 사용한다.
+`v0.5.0` release는 다음 5단계를 완료 조건으로 사용한다.
 
 1. `scripts/check.sh`로 static, AMD64, ARM64 Container build와 test를 완료한다.
 2. Server에서 health guard preflight를 통과한 release image로 Simulation server와 Visualizer를 실행한다.

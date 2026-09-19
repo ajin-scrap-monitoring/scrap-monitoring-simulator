@@ -81,6 +81,11 @@ def build_parser(
         choices=("auto", "osmesa", "egl"),
         **_environment_argument(values, "CAMERA_BACKEND"),
     )
+    live.add_argument(
+        "--camera-native-raster",
+        type=_boolean,
+        **_environment_argument(values, "CAMERA_NATIVE_RASTER", "false"),
+    )
     return parser
 
 
@@ -99,6 +104,15 @@ def main(
                 camera_config = replace(
                     camera_config,
                     backend=args.camera_backend,
+                )
+            if args.camera_native_raster:
+                camera_config = replace(
+                    camera_config,
+                    video=replace(
+                        camera_config.video,
+                        raster_width=camera_config.video.width,
+                        raster_height=camera_config.video.height,
+                    ),
                 )
         live_config = LiveConfig(
             tcp_host=args.tcp_host,

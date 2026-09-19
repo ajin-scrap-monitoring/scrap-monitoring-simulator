@@ -94,3 +94,46 @@ def test_vtk_backend_renders_perspective_mjpeg_source_frame() -> None:
     with Image.open(BytesIO(frame.jpeg)) as image:
         assert image.format == "JPEG"
         assert image.size == (1920, 1080)
+
+
+def test_vtk_backend_bypasses_scaler_on_matching_raster_dimensions() -> None:
+    parser = ContractParser(CONTRACT_ROOT)
+    records = tuple(
+        parser.parse_line(line).value
+        for line in (CONTRACT_ROOT / "fixtures/scene.v2.jsonl")
+        .read_bytes()
+        .splitlines(keepends=True)
+    )
+    assert isinstance(records[0], SceneDefinition)
+    assert isinstance(records[1], SceneSegment)
+    scene_frame = materialize_keyframe(
+        records[0], records[1].right, records[1].right_sequence, records[1].run_id
+    )
+    config = SyntheticCameraConfig.from_file()
+    config = replace(
+        config,
+        video=replace(
+            config.video,
+            raster_width=1920,
+            raster_height=1080,
+            jpeg_quality=70,
+        ),
+        effects=replace(
+            config.effects,
+            noise_standard_deviation=0.0,
+            vignette_strength=0.0,
+        ),
+    )
+
+    renderer = VtkPbrRenderer()
+    try:
+        frame = renderer.render(records[0], scene_frame, config)
+        assert renderer._scaler is None
+        assert frame.stage_seconds["resize"] == 0.0
+    finally:
+        renderer.close()
+
+    assert frame.jpeg.startswith(b"\xff\xd8")
+    with Image.open(BytesIO(frame.jpeg)) as image:
+        assert image.format == "JPEG"
+        assert image.size == (1920, 1080)
