@@ -26,7 +26,7 @@ Simulation Core만 scene과 simulation clock을 변경한다. S2E adapter와 Vis
 
 Simulation Core와 S2E adapter는 하나의 Rust process에서 실행한다. Sensor별 scan 계산은 독립 worker가 담당하고 sensor별 UDP actor는 별도 socket과 protocol 상태를 소유한다.
 
-Visualizer는 Python server process, synthetic camera render worker와 Browser WebGL client로 구성한다. FastAPI는 Hypertext Transfer Protocol (HTTP), WebSocket I/O와 static page 제공을 담당한다. Render worker는 OSMesa 또는 EGL Visualization Toolkit (VTK) rendering을 수행하고 CPU가 effect, resize와 JPEG encoding을 수행한다. WebGL은 Browser GPU에서 model surface를 rendering한다.
+Visualizer는 Python server process, synthetic camera render worker와 Browser WebGL client로 구성한다. FastAPI는 Hypertext Transfer Protocol (HTTP), WebSocket I/O와 static page 제공을 담당한다. Render worker는 OSMesa 또는 EGL Visualization Toolkit (VTK) rendering을 수행하고 CPU가 effect, resize와 JPEG encoding을 수행한다. EGL과 native raster 설정에서는 1920 x 1080 직접 래스터화로 CPU resize 단계를 생략한다. WebGL은 Browser GPU에서 model surface를 rendering한다.
 
 두 server process는 bounded latest-only Transmission Control Protocol (TCP) scene stream으로 연결한다. Visualizer가 느리거나 종료돼도 Simulation Core와 S2E UDP endpoint는 계속 동작한다. Render worker, visual stream과 Browser decode queue는 각각 최신 항목 1개만 유지한다.
 
@@ -54,7 +54,7 @@ Visualizer는 integer target id로 30 FPS target time을 정한다. 새 segment�
 | --- | --- | --- |
 | 1 | Scene source | 인접 keyframe segment 수신 |
 | 2 | Target scheduler | 30 FPS target id, deadline과 latest-only 교체 |
-| 3 | Camera renderer | 576 x 324 VTK raster, CPU effect, 1920 x 1080 JPEG |
+| 3 | Camera renderer | VTK raster(576 x 324 또는 EGL native 1920 x 1080), CPU effect, 1920 x 1080 JPEG |
 | 4 | Paired visual stream | target metadata, Float32 heights와 JPEG 전송 |
 | 5 | Browser | WebGL surface update와 camera bitmap 동시 presentation |
 | 6 | Edge V4L2 | Raw MJPEG stream, device sequence와 monotonic EOF timestamp |

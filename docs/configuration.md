@@ -59,8 +59,9 @@ Visualizer의 `live` command는 TCP scene receiver와 HTTP server를 함께 실�
 | `SCRAP_MONITORING_VISUALIZER_CAMERA_ENABLED` | `true` | Synthetic camera pipeline 활성화 |
 | `SCRAP_MONITORING_VISUALIZER_CAMERA_PROFILE` | Package 기본 profile | Camera profile 경로 |
 | `SCRAP_MONITORING_VISUALIZER_CAMERA_BACKEND` | `osmesa` | `osmesa` 또는 명시적 NVIDIA `egl` renderer |
+| `SCRAP_MONITORING_VISUALIZER_CAMERA_NATIVE_RASTER` | `false` | EGL 환경 1920 x 1080 직접 래스터화와 CPU 리사이즈 생략 |
 
-Camera profile v1의 외부 출력은 JPEG quality 60의 1920 x 1080, 30 Frames Per Second (FPS) Motion JPEG (MJPEG)다. 기본 OSMesa renderer 또는 GPU overlay의 EGL renderer가 576 x 324 RGB raster를 만든다. CPU가 effect, Visualization Toolkit (VTK) linear scaler resize와 Pillow JPEG encoding을 한 번 수행한다. Paired visual stream과 raw camera stream은 같은 JPEG와 target id를 사용한다.
+Camera profile v1의 외부 출력은 JPEG quality 60의 1920 x 1080, 30 Frames Per Second (FPS) Motion JPEG (MJPEG)다. 기본 OSMesa renderer 또는 GPU overlay의 EGL renderer가 576 x 324 RGB raster를 만든다. CPU가 effect, Visualization Toolkit (VTK) linear scaler resize와 Pillow JPEG encoding을 한 번 수행한다. EGL backend와 `SCRAP_MONITORING_VISUALIZER_CAMERA_NATIVE_RASTER=true` 설정에서는 1920 x 1080 직접 래스터화로 CPU resize 단계를 생략한다. Paired visual stream과 raw camera stream은 같은 JPEG와 target id를 사용한다.
 
 `egl`은 NVIDIA GPU를 명시적으로 요청하는 Server 설정이다. Renderer가 EGL window, NVIDIA OpenGL vendor 또는 renderer를 확인하지 못하면 시작에 실패한다. GPU가 없는 로컬과 Continuous Integration (CI) 환경은 기본 `osmesa`를 사용한다.
 
