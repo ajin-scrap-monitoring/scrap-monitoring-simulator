@@ -261,6 +261,7 @@ async fn run_endpoint(
     let mut streaming = false;
     let mut last_observed_scan_id = None;
     let mut last_transmitted_scan_id = None;
+    let mut encoder = HqEncoder::default();
 
     loop {
         tokio::select! {
@@ -277,22 +278,34 @@ async fn run_endpoint(
                     counters.rejected_commands.fetch_add(1, Ordering::Relaxed);
                     continue;
                 };
+                if active_peer != Some(peer) {
+                    streaming = false;
+                    last_transmitted_scan_id = None;
+                    encoder.reset();
+                }
                 active_peer = Some(peer);
                 match command.code {
                     COMMAND_STOP | COMMAND_RESET => {
                         streaming = false;
                         last_transmitted_scan_id = None;
+                        encoder.reset();
                     }
                     COMMAND_GET_DEVICE_INFO if command.payload.is_empty() => {
                         streaming = false;
+                        last_transmitted_scan_id = None;
+                        encoder.reset();
                         socket.send_to(&device_info_response(&config.sensor_id), peer).await?;
                     }
                     COMMAND_GET_DEVICE_HEALTH if command.payload.is_empty() => {
                         streaming = false;
+                        last_transmitted_scan_id = None;
+                        encoder.reset();
                         socket.send_to(&response(ANSWER_DEVICE_HEALTH, &[0, 0, 0], false), peer).await?;
                     }
                     COMMAND_GET_LIDAR_CONF => {
                         streaming = false;
+                        last_transmitted_scan_id = None;
+                        encoder.reset();
                         if let Some(payload) = lidar_configuration_response(&config, command.payload) {
                             socket.send_to(&response(ANSWER_GET_LIDAR_CONF, &payload, false), peer).await?;
                         } else {
@@ -301,13 +314,17 @@ async fn run_endpoint(
                     }
                     COMMAND_HQ_MOTOR_SPEED if command.payload.len() == 2 => {}
                     COMMAND_EXPRESS_SCAN if valid_scan_request(command.payload) => {
+                        if !streaming {
+                            encoder.reset();
+                            last_transmitted_scan_id = None;
+                        }
                         streaming = true;
                         socket.send_to(&response(ANSWER_MEASUREMENT_HQ, &[], true), peer).await?;
                         let latest = scans.borrow_and_update().clone();
                         if let Some(scan) = latest
                             && last_transmitted_scan_id != Some(scan.scan_id)
                         {
-                            transmit_scan(&socket, peer, &scan, &counters).await?;
+                            transmit_scan(&socket, peer, &scan, &counters, &mut encoder).await?;
                             last_transmitted_scan_id = Some(scan.scan_id);
                         }
                     }
@@ -334,7 +351,7 @@ async fn run_endpoint(
                     && let Some(peer) = active_peer
                     && last_transmitted_scan_id != Some(scan.scan_id)
                 {
-                    transmit_scan(&socket, peer, &scan, &counters).await?;
+                    transmit_scan(&socket, peer, &scan, &counters, &mut encoder).await?;
                     last_transmitted_scan_id = Some(scan.scan_id);
                 }
             }
@@ -443,8 +460,9 @@ async fn transmit_scan(
     peer: SocketAddr,
     scan: &PublishedScan,
     counters: &EndpointCounters,
+    encoder: &mut HqEncoder,
 ) -> io::Result<()> {
-    for capsule in encode_hq_capsules(scan) {
+    for capsule in encoder.encode(scan) {
         socket.send_to(&capsule, peer).await?;
         counters
             .transmitted_capsules
@@ -453,32 +471,64 @@ async fn transmit_scan(
     Ok(())
 }
 
-fn encode_hq_capsules(scan: &PublishedScan) -> Vec<[u8; HQ_CAPSULE_BYTES]> {
-    let capsule_count = scan.samples.len().div_ceil(HQ_NODES_PER_CAPSULE);
-    let mut capsules = Vec::with_capacity(capsule_count);
-    for capsule_index in 0..capsule_count {
-        let mut capsule = [0_u8; HQ_CAPSULE_BYTES];
-        capsule[0] = HQ_CAPSULE_SYNC;
-        capsule[1..9].copy_from_slice(&scan.scan_id.to_le_bytes());
-        for node_index in 0..HQ_NODES_PER_CAPSULE {
-            let sample_index = capsule_index * HQ_NODES_PER_CAPSULE + node_index;
-            let Some(sample) = scan.samples.get(sample_index) else {
-                break;
-            };
-            let offset = 9 + node_index * HQ_NODE_BYTES;
-            capsule[offset..offset + 2].copy_from_slice(&sample.angle_z_q14.to_le_bytes());
+/// HQ capsules contain exactly 96 real nodes; a rotation boundary may occur inside one.
+/// An incomplete tail (at most 95 nodes) waits for the next rotation, never zero padding.
+struct HqEncoder {
+    capsule: [u8; HQ_CAPSULE_BYTES],
+    node_count: usize,
+    last_scan_id: Option<u64>,
+}
+
+impl Default for HqEncoder {
+    fn default() -> Self {
+        Self {
+            capsule: [0; HQ_CAPSULE_BYTES],
+            node_count: 0,
+            last_scan_id: None,
+        }
+    }
+}
+
+impl HqEncoder {
+    fn reset(&mut self) {
+        self.node_count = 0;
+        self.last_scan_id = None;
+    }
+
+    fn encode(&mut self, scan: &PublishedScan) -> Vec<[u8; HQ_CAPSULE_BYTES]> {
+        if self
+            .last_scan_id
+            .is_some_and(|previous| previous.checked_add(1) != Some(scan.scan_id))
+        {
+            // A latest-only producer may skip a rotation; do not join its old partial tail.
+            self.node_count = 0;
+        }
+        self.last_scan_id = Some(scan.scan_id);
+        let mut capsules =
+            Vec::with_capacity((self.node_count + scan.samples.len()) / HQ_NODES_PER_CAPSULE);
+        for (sample_index, sample) in scan.samples.iter().enumerate() {
+            if self.node_count == 0 {
+                self.capsule[0] = HQ_CAPSULE_SYNC;
+                self.capsule[1..9].copy_from_slice(&scan.scan_id.to_le_bytes());
+            }
+            let offset = 9 + self.node_count * HQ_NODE_BYTES;
+            self.capsule[offset..offset + 2].copy_from_slice(&sample.angle_z_q14.to_le_bytes());
             let distance = u32::try_from(sample.dist_mm_q2)
                 .expect("validated measurement distance must fit the S2E HQ field");
-            capsule[offset + 2..offset + 6].copy_from_slice(&distance.to_le_bytes());
-            capsule[offset + 6] = sample.quality;
-            capsule[offset + 7] = u8::from(sample_index == 0);
+            self.capsule[offset + 2..offset + 6].copy_from_slice(&distance.to_le_bytes());
+            self.capsule[offset + 6] = sample.quality;
+            self.capsule[offset + 7] = u8::from(sample_index == 0);
+            self.node_count += 1;
+            if self.node_count == HQ_NODES_PER_CAPSULE {
+                let crc_offset = HQ_CAPSULE_BYTES - 4;
+                let crc = padded_crc32(&self.capsule[..crc_offset]);
+                self.capsule[crc_offset..].copy_from_slice(&crc.to_le_bytes());
+                capsules.push(self.capsule);
+                self.node_count = 0;
+            }
         }
-        let crc_offset = HQ_CAPSULE_BYTES - 4;
-        let crc = padded_crc32(&capsule[..crc_offset]);
-        capsule[crc_offset..].copy_from_slice(&crc.to_le_bytes());
-        capsules.push(capsule);
+        capsules
     }
-    capsules
 }
 
 fn padded_crc32(bytes: &[u8]) -> u32 {
@@ -533,11 +583,19 @@ mod tests {
                 })
                 .collect(),
         };
-        let capsules = encode_hq_capsules(&scan);
+        let mut encoder = HqEncoder::default();
+        let mut capsules = encoder.encode(&scan);
+        assert_eq!(capsules.len(), 1);
+        let following = PublishedScan {
+            scan_id: 8,
+            samples: scan.samples[..95].to_vec(),
+        };
+        capsules.extend(encoder.encode(&following));
         assert_eq!(capsules.len(), 2);
         assert_eq!(capsules[0][0], HQ_CAPSULE_SYNC);
         assert_eq!(capsules[0][16], 1);
         assert_eq!(capsules[1][16], 0);
+        assert_eq!(capsules[1][24], 1);
         for capsule in capsules {
             let crc_offset = HQ_CAPSULE_BYTES - 4;
             let expected = u32::from_le_bytes(capsule[crc_offset..].try_into().unwrap());
@@ -555,5 +613,154 @@ mod tests {
             LOOP_RESPONSE_FLAG | HQ_CAPSULE_BYTES as u32
         );
         assert_eq!(header[6], ANSWER_MEASUREMENT_HQ);
+    }
+
+    #[test]
+    fn three_full_rotations_preserve_exact_samples_without_padding() {
+        let mut encoder = HqEncoder::default();
+        let mut encoded = Vec::new();
+        let mut expected = Vec::new();
+        for scan_id in 1..=3 {
+            let samples: Vec<_> = (0..3200)
+                .map(|index| HqSample {
+                    angle_z_q14: index as u16,
+                    // An actual zero-distance/zero-quality sample must survive unchanged.
+                    dist_mm_q2: if index == 0 {
+                        0
+                    } else {
+                        scan_id * 10000 + index
+                    },
+                    quality: if index == 0 { 0 } else { 40 },
+                })
+                .collect();
+            expected.extend(samples.iter().copied());
+            encoded.extend(encoder.encode(&PublishedScan { scan_id, samples }));
+        }
+        let nodes: Vec<_> = encoded
+            .iter()
+            .flat_map(|capsule| {
+                (0..HQ_NODES_PER_CAPSULE).map(move |i| {
+                    let offset = 9 + i * HQ_NODE_BYTES;
+                    (
+                        u16::from_le_bytes(capsule[offset..offset + 2].try_into().unwrap()),
+                        u32::from_le_bytes(capsule[offset + 2..offset + 6].try_into().unwrap()),
+                        capsule[offset + 6],
+                        capsule[offset + 7],
+                    )
+                })
+            })
+            .collect();
+        assert_eq!(
+            nodes.len(),
+            expected.len(),
+            "packet padding must not become scan data"
+        );
+        for (i, (actual, sample)) in nodes.iter().zip(&expected).enumerate() {
+            assert_eq!(
+                *actual,
+                (
+                    sample.angle_z_q14,
+                    sample.dist_mm_q2 as u32,
+                    sample.quality,
+                    u8::from(i % 3200 == 0)
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn partial_capsule_is_bounded_and_discarded_on_reset_or_scan_gap() {
+        let scan = |scan_id, length| PublishedScan {
+            scan_id,
+            samples: (0..length)
+                .map(|i| HqSample {
+                    angle_z_q14: i,
+                    dist_mm_q2: u64::from(i) + scan_id * 1000,
+                    quality: 0,
+                })
+                .collect(),
+        };
+        let mut encoder = HqEncoder::default();
+        assert!(encoder.encode(&scan(1, 95)).is_empty());
+        assert_eq!(encoder.node_count, 95);
+        encoder.reset();
+        let after_reset = encoder.encode(&scan(2, 96));
+        assert_eq!(after_reset.len(), 1);
+        assert_eq!(
+            u32::from_le_bytes(after_reset[0][11..15].try_into().unwrap()),
+            2000
+        );
+        assert_eq!(after_reset[0][16], 1);
+        assert!(encoder.encode(&scan(3, 95)).is_empty());
+        let after_gap = encoder.encode(&scan(5, 96));
+        assert_eq!(after_gap.len(), 1);
+        assert_eq!(
+            u32::from_le_bytes(after_gap[0][11..15].try_into().unwrap()),
+            5000
+        );
+        assert_eq!(after_gap[0][16], 1);
+        assert_eq!(encoder.node_count, 0);
+    }
+
+    #[tokio::test]
+    async fn udp_stop_restart_and_new_peer_start_with_a_fresh_capsule() {
+        use std::time::Duration;
+
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let address = server.local_addr().unwrap();
+        let scan = Arc::new(PublishedScan {
+            scan_id: 7,
+            samples: (0..97)
+                .map(|i| HqSample {
+                    angle_z_q14: i,
+                    dist_mm_q2: u64::from(i) * 4,
+                    quality: 40,
+                })
+                .collect(),
+        });
+        let (_publisher, scans) = watch::channel(Some(scan));
+        let (shutdown, stop) = watch::channel(false);
+        let task = tokio::spawn(run_endpoint(
+            server,
+            EndpointConfig {
+                sensor_id: "test-sensor".into(),
+                bind: address,
+                sample_rate_hz: 32000.0,
+                rotation_rate_hz: 10.0,
+                max_distance_m: 30.0,
+            },
+            scans,
+            stop,
+            Arc::new(EndpointCounters::default()),
+        ));
+        let first = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let second = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let start = payload_command(COMMAND_EXPRESS_SCAN, &[2, 0, 0, 0, 0]);
+        for (index, peer) in [&first, &first, &second].iter().enumerate() {
+            if index == 1 {
+                peer.send_to(&[COMMAND_SYNC, COMMAND_STOP], address)
+                    .await
+                    .unwrap();
+            }
+            peer.send_to(&start, address).await.unwrap();
+            let mut bytes = [0u8; HQ_CAPSULE_BYTES];
+            let (size, _) =
+                tokio::time::timeout(Duration::from_secs(3), peer.recv_from(&mut bytes))
+                    .await
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(size, 7);
+            let (size, _) =
+                tokio::time::timeout(Duration::from_secs(3), peer.recv_from(&mut bytes))
+                    .await
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(size, HQ_CAPSULE_BYTES);
+            assert_eq!(bytes[16], 1);
+            assert_eq!(u16::from_le_bytes(bytes[9..11].try_into().unwrap()), 0);
+            assert_eq!(u16::from_le_bytes(bytes[17..19].try_into().unwrap()), 1);
+        }
+        shutdown.send_replace(true);
+        task.await.unwrap().unwrap();
     }
 }

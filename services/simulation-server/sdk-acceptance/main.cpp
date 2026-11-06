@@ -16,6 +16,8 @@
 namespace {
 
 constexpr std::uint32_t kControlTimeoutMs = 5'000;
+constexpr std::size_t kExpectedNodes = 3'200;
+constexpr std::size_t kScansPerSession = 4;
 
 struct SensorResult {
     std::string host;
@@ -73,11 +75,23 @@ SensorResult accept_sensor(const SensorEndpoint& endpoint) {
     }
 
     std::vector<sl_lidar_response_measurement_node_hq_t> nodes(32'768);
-    std::size_t count = nodes.size();
-    require_result(driver->grabScanDataHq(nodes.data(), count, 5'000),
-                   "grabScanDataHq");
-    if (count == 0 || count > nodes.size()) {
-        throw std::runtime_error("SDK returned an invalid HQ node count");
+    std::size_t count = 0;
+    // Exercise repeated complete rotations and restart while a capsule may hold a tail.
+    for (std::size_t session = 0; session < 2; ++session) {
+        if (session > 0) {
+            require_result(driver->stop(kControlTimeoutMs), "stop before restart");
+            require_result(driver->startScan(false, true, 0, &mode), "restart scan");
+        }
+        for (std::size_t scan = 0; scan < kScansPerSession; ++scan) {
+            count = nodes.size();
+            require_result(driver->grabScanDataHq(nodes.data(), count, 5'000),
+                           "grabScanDataHq");
+            if (count != kExpectedNodes) {
+                throw std::runtime_error(
+                    "SDK rotation must contain exactly 3200 generated nodes; got " +
+                    std::to_string(count));
+            }
+        }
     }
     require_result(driver->ascendScanData(nodes.data(), count), "ascendScanData");
     const auto measured_count = static_cast<std::size_t>(std::count_if(
